@@ -1,6 +1,6 @@
 """
 Account Hub — Flask application.
-Run with: python app.py
+Run with: python app.py   (or double-click start.command on Mac)
 Then open: http://localhost:5000
 """
 
@@ -9,7 +9,7 @@ import logging
 import threading
 from datetime import datetime
 
-from flask import Flask, jsonify, render_template, request, abort
+from flask import Flask, jsonify, redirect, render_template, request, abort, url_for
 
 import config
 import database as db
@@ -36,6 +36,181 @@ start_scheduler()
 @app.route("/")
 def index():
     return render_template("dashboard.html")
+
+
+# ── Settings API ──────────────────────────────────────────────────────────────
+
+MASKED_KEYS = {"google_client_secret", "sf_password", "sf_security_token", "google_token"}
+
+
+@app.route("/api/settings", methods=["GET"])
+def api_get_settings():
+    """Return all settings; secrets are masked."""
+    raw = db.get_all_settings()
+    safe = {}
+    for k, v in raw.items():
+        if k in MASKED_KEYS:
+            safe[k] = "••••••••" if v else ""
+        else:
+            safe[k] = v
+    return jsonify(safe)
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_save_settings():
+    """Save one or more settings. Blank strings clear the key."""
+    body = request.get_json(force=True)
+    allowed = {
+        "google_client_id", "google_client_secret",
+        "sf_username", "sf_password", "sf_security_token", "sf_domain",
+        "report_senders",
+        "setup_complete",
+        "alert_mtd_pct", "alert_reorder_days",
+    }
+    saved = []
+    for key, value in body.items():
+        if key not in allowed:
+            continue
+        v = str(value).strip() if value is not None else None
+        db.set_setting(key, v if v else None)
+        saved.append(key)
+    return jsonify({"ok": True, "saved": saved})
+
+
+# ── Integrations status ────────────────────────────────────────────────────────
+
+@app.route("/api/integrations/status")
+def api_integrations_status():
+    """Return connection status for all integrations."""
+    from integrations.google_auth import is_configured, is_connected, get_connected_email
+
+    google_connected = is_connected()
+    google_email = get_connected_email() if google_connected else None
+
+    # Salesforce status
+    sf_user = db.get_setting("sf_username") or config.SF_USERNAME
+    sf_pass = db.get_setting("sf_password") or config.SF_PASSWORD
+    sf_token = db.get_setting("sf_security_token") or config.SF_SECURITY_TOKEN
+    sf_configured = bool(sf_user and sf_pass)
+
+    # Report senders
+    report_senders = db.get_setting("report_senders") or ",".join(config.REPORT_SENDERS)
+
+    # Email log stats
+    conn = db.get_conn()
+    email_count = conn.execute("SELECT COUNT(*) as n FROM email_log WHERE status='ok'").fetchone()["n"]
+    conn.close()
+
+    # iMessage / Apple Notes — Mac-only
+    import platform
+    is_mac = platform.system() == "Darwin"
+
+    return jsonify({
+        "google": {
+            "connected":  google_connected,
+            "configured": is_configured(),
+            "email":      google_email,
+            "covers":     ["Gmail", "Google Drive", "Google Sheets"],
+        },
+        "salesforce": {
+            "configured": sf_configured,
+            "username":   sf_user,
+        },
+        "email_parser": {
+            "active":         True,
+            "emails_parsed":  email_count,
+            "report_senders": report_senders,
+        },
+        "imessage": {
+            "available": is_mac,
+            "platform_note": "iMessage sync requires a Mac running this app locally.",
+        },
+        "apple_notes": {
+            "available": is_mac,
+            "platform_note": "Apple Notes sync requires a Mac running this app locally.",
+        },
+        "setup_complete": bool(db.get_setting("setup_complete")),
+    })
+
+
+# ── Google OAuth routes ────────────────────────────────────────────────────────
+
+@app.route("/integrations/google/start")
+def google_oauth_start():
+    from integrations.google_auth import get_auth_url
+    url = get_auth_url()
+    if not url:
+        return redirect("/#integrations?error=google_not_configured")
+    return redirect(url)
+
+
+@app.route("/integrations/google/callback")
+def google_oauth_callback():
+    code = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error")
+
+    if error:
+        log.warning("Google OAuth error: %s", error)
+        return redirect("/#integrations?google_error=" + error)
+
+    if not code:
+        return redirect("/#integrations?google_error=no_code")
+
+    from integrations.google_auth import handle_callback
+    success, message = handle_callback(code=code, state=state)
+
+    if success:
+        return redirect("/#integrations?google_connected=1")
+    else:
+        return redirect(f"/#integrations?google_error={message}")
+
+
+@app.route("/integrations/google/disconnect", methods=["POST"])
+def google_disconnect():
+    from integrations.google_auth import disconnect
+    disconnect()
+    return jsonify({"ok": True})
+
+
+# ── Salesforce test ────────────────────────────────────────────────────────────
+
+@app.route("/integrations/salesforce/test", methods=["POST"])
+def salesforce_test():
+    body = request.get_json(force=True)
+    username = body.get("username", "").strip()
+    password = body.get("password", "").strip()
+    token    = body.get("security_token", "").strip()
+    domain   = body.get("domain", "login").strip()
+
+    if not username or not password:
+        return jsonify({"ok": False, "message": "Username and password are required."})
+
+    try:
+        from simple_salesforce import Salesforce, SalesforceAuthenticationFailed
+        sf = Salesforce(
+            username=username,
+            password=password,
+            security_token=token,
+            domain=domain,
+        )
+        # Quick query to verify access
+        result = sf.query("SELECT Id, Name FROM User WHERE IsActive=true LIMIT 1")
+        # Save credentials on success
+        db.set_setting("sf_username", username)
+        db.set_setting("sf_password", password)
+        db.set_setting("sf_security_token", token)
+        db.set_setting("sf_domain", domain)
+        return jsonify({"ok": True, "message": f"Connected to Salesforce as {username}"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"Connection failed: {e}"})
+
+
+@app.route("/integrations/salesforce/disconnect", methods=["POST"])
+def salesforce_disconnect():
+    for key in ("sf_username", "sf_password", "sf_security_token"):
+        db.set_setting(key, None)
+    return jsonify({"ok": True})
 
 
 # ── Dashboard API ─────────────────────────────────────────────────────────────
@@ -232,7 +407,6 @@ def api_add_teg(account_id: int):
         model=body.get("model"),
         notes=body.get("notes"),
     )
-    # Set initial cartridge types if provided
     if body.get("cartridge_types"):
         db.set_teg_cartridges(teg_id, body["cartridge_types"])
     return jsonify({"id": teg_id}), 201
@@ -312,20 +486,28 @@ def api_sync_email():
 @app.route("/api/sync/notes", methods=["POST"])
 def api_sync_notes():
     def _run():
-        from integrations.apple_notes import sync_apple_notes
-        from integrations.onenote import sync_onenote_notes
-        sync_apple_notes()
-        sync_onenote_notes()
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.apple_notes import sync_apple_notes
+                sync_apple_notes()
+            except Exception as e:
+                log.warning("Apple Notes sync failed: %s", e)
+        else:
+            log.info("Apple Notes sync skipped — not on Mac")
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing notes from Apple Notes + OneNote..."})
+    return jsonify({"ok": True, "message": "Syncing notes from Apple Notes..."})
 
 
 @app.route("/api/sync/salesforce", methods=["POST"])
 def api_sync_sf():
     def _run():
-        from integrations.salesforce import run_sf_sync
-        run_sf_sync()
+        try:
+            from integrations.salesforce import run_sf_sync
+            run_sf_sync()
+        except Exception as e:
+            log.warning("Salesforce sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing Salesforce contacts + opportunities..."})
@@ -334,23 +516,39 @@ def api_sync_sf():
 @app.route("/api/sync/imessage", methods=["POST"])
 def api_sync_imessage():
     def _run():
-        from integrations.imessage import sync_imessage
-        result = sync_imessage()
-        log.info("iMessage sync: %s", result)
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.imessage import sync_imessage
+                result = sync_imessage()
+                log.info("iMessage sync: %s", result)
+            except Exception as e:
+                log.warning("iMessage sync failed: %s", e)
+        else:
+            log.info("iMessage sync skipped — not on Mac")
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing iMessage communication history..."})
 
 
-@app.route("/api/sync/onedrive", methods=["POST"])
-def api_sync_onedrive():
+@app.route("/api/sync/drive", methods=["POST"])
+def api_sync_drive():
     def _run():
-        from integrations.onedrive import sync_onedrive_files
-        result = sync_onedrive_files()
-        log.info("OneDrive sync: %s", result)
+        try:
+            from integrations.google_drive import sync_google_drive_files
+            result = sync_google_drive_files()
+            log.info("Google Drive sync: %s", result)
+        except Exception as e:
+            log.warning("Google Drive sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing OneDrive files..."})
+    return jsonify({"ok": True, "message": "Syncing Google Drive files..."})
+
+
+# Keep old route working for any cached references
+@app.route("/api/sync/onedrive", methods=["POST"])
+def api_sync_onedrive():
+    return api_sync_drive()
 
 
 @app.route("/api/sync/status")
@@ -402,6 +600,6 @@ atexit.register(stop_scheduler)
 if __name__ == "__main__":
     print(f"\n{'='*50}")
     print("  Account Hub — Starting")
-    print(f"  Open: http://localhost:{config.PORT}")
+    print(f"  Open your browser to: http://localhost:{config.PORT}")
     print(f"{'='*50}\n")
     app.run(host="0.0.0.0", port=config.PORT, debug=False)

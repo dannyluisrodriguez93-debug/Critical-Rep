@@ -18,18 +18,24 @@ log = logging.getLogger(__name__)
 
 def _get_sf():
     """Return a Salesforce connection or None if unavailable."""
-    if not all([config.SF_USERNAME, config.SF_PASSWORD, config.SF_SECURITY_TOKEN]):
+    # DB settings take priority over env vars
+    username = db.get_setting("sf_username") or config.SF_USERNAME
+    password = db.get_setting("sf_password") or config.SF_PASSWORD
+    token    = db.get_setting("sf_security_token") or config.SF_SECURITY_TOKEN
+    domain   = db.get_setting("sf_domain") or config.SF_DOMAIN
+
+    if not all([username, password]):
         log.info("Salesforce credentials not configured — skipping SF sync")
         return None
     try:
-        from simple_salesforce import Salesforce, SalesforceAuthenticationFailed
+        from simple_salesforce import Salesforce
         sf = Salesforce(
-            username=config.SF_USERNAME,
-            password=config.SF_PASSWORD,
-            security_token=config.SF_SECURITY_TOKEN,
-            domain=config.SF_DOMAIN,
+            username=username,
+            password=password,
+            security_token=token or "",
+            domain=domain or "login",
         )
-        log.info("Salesforce connected as %s", config.SF_USERNAME)
+        log.info("Salesforce connected as %s", username)
         return sf
     except Exception as e:
         log.warning("Salesforce connection failed: %s", e)

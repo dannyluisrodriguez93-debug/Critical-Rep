@@ -20,12 +20,15 @@
     <div class="topbar-right">
       <span id="last-sync" class="sync-label"></span>
       <div class="sync-actions">
-        <button onclick="syncEmail()"      class="btn btn-sm" title="Sync email reports">&#9993; Email</button>
-        <button onclick="syncNotes()"      class="btn btn-sm" title="Sync Apple Notes + OneNote">&#128221; Notes</button>
-        <button onclick="syncOneDrive()"   class="btn btn-sm" title="Sync OneDrive files">&#128196; Drive</button>
-        <button onclick="synciMessage()"   class="btn btn-sm" title="Sync iMessage history">&#128172; iMsg</button>
+        <button onclick="syncEmail()"      class="btn btn-sm" title="Sync Gmail report emails">&#9993; Email</button>
+        <button onclick="syncNotes()"      class="btn btn-sm" title="Sync Apple Notes (Mac only)">&#128221; Notes</button>
+        <button onclick="syncDrive()"      class="btn btn-sm" title="Sync Google Drive files">&#128196; Drive</button>
+        <button onclick="synciMessage()"   class="btn btn-sm" title="Sync iMessage history (Mac only)">&#128172; iMsg</button>
         <button onclick="syncSalesforce()" class="btn btn-sm" title="Sync Salesforce">&#9729; SF</button>
       </div>
+      <button onclick="showIntegrations()" class="btn btn-sm btn-ghost" id="integrations-nav-btn" title="Manage integrations">
+        &#9881; Integrations
+      </button>
     </div>
   </header>
 
@@ -72,10 +75,24 @@
         </div>
       </section>
 
+      <!-- ═══ INTEGRATIONS PAGE ══════════════════════════════════════ -->
+      <section id="view-integrations" class="view">
+        <div class="view-header">
+          <h2>Integrations</h2>
+          <div class="view-header-actions">
+            <span class="subtitle">Connect your data sources. All settings are saved automatically.</span>
+          </div>
+        </div>
+        <div id="integrations-body" class="integrations-grid">
+          <!-- populated by JS -->
+          <div class="integration-loading">Loading integration status…</div>
+        </div>
+      </section>
+
       <!-- ═══ ACCOUNT HOMEPAGE ═══════════════════════════════════════ -->
       <section id="view-account" class="view">
 
-        <!-- Account Hero ─────────────────────────────────────────── -->
+        <!-- Account Hero -->
         <div id="acct-hero" class="acct-hero">
           <div class="acct-hero-back">
             <button onclick="showDashboard()" class="btn btn-ghost btn-sm">&larr; Dashboard</button>
@@ -93,14 +110,11 @@
               <span id="acct-target-pct"  class="hero-badge orange hidden"></span>
             </div>
           </div>
-          <!-- Quick KPI strip (always visible) -->
           <div id="acct-kpi-row" class="kpi-row acct-kpi-strip"></div>
         </div>
 
-        <!-- Inventory + Tally + Comms Grid ─────────────────────── -->
+        <!-- Inventory + Tally + Comms Grid -->
         <div class="account-grid3">
-
-          <!-- TEG Inventory -->
           <div class="card panel-teg">
             <div class="card-header">
               <h3>TEG Inventory</h3>
@@ -111,8 +125,6 @@
             </div>
             <div id="teg-list" class="card-body teg-list-body"></div>
           </div>
-
-          <!-- Cartridge & QC Tally -->
           <div class="card panel-tally">
             <div class="card-header">
               <h3>Cartridge &amp; QC Tally</h3>
@@ -125,8 +137,6 @@
             </div>
             <div id="tally-body" class="card-body tally-body"></div>
           </div>
-
-          <!-- Communication Activity -->
           <div class="card panel-comms">
             <div class="card-header">
               <h3>Communication Activity</h3>
@@ -134,10 +144,9 @@
             </div>
             <div id="comm-activity-body" class="card-body"></div>
           </div>
+        </div>
 
-        </div><!-- /.account-grid3 -->
-
-        <!-- Account Tabs ─────────────────────────────────────────── -->
+        <!-- Account Tabs -->
         <div class="tabs">
           <button class="tab active" data-tab="tab-overview">Overview</button>
           <button class="tab" data-tab="tab-sales">Sales</button>
@@ -147,7 +156,6 @@
           <button class="tab" data-tab="tab-activity">Activity Log</button>
         </div>
 
-        <!-- Overview Tab ────────────────────────────────────────── -->
         <div id="tab-overview" class="tab-panel active">
           <div class="card">
             <div class="card-header"><h3>Revenue Targets</h3></div>
@@ -162,7 +170,6 @@
           </div>
         </div>
 
-        <!-- Sales Tab ───────────────────────────────────────────── -->
         <div id="tab-sales" class="tab-panel">
           <div class="card">
             <div class="card-header">
@@ -178,7 +185,6 @@
           </div>
         </div>
 
-        <!-- Contacts Tab ────────────────────────────────────────── -->
         <div id="tab-contacts" class="tab-panel">
           <div class="card">
             <div class="card-header">
@@ -189,7 +195,6 @@
           </div>
         </div>
 
-        <!-- Notes Tab ───────────────────────────────────────────── -->
         <div id="tab-notes" class="tab-panel">
           <div class="card">
             <div class="card-header">
@@ -203,18 +208,16 @@
           </div>
         </div>
 
-        <!-- Files Tab ───────────────────────────────────────────── -->
         <div id="tab-files" class="tab-panel">
           <div class="card">
             <div class="card-header">
-              <h3>OneDrive Files</h3>
-              <button onclick="syncOneDrive()" class="btn btn-sm btn-ghost">&#8635; Sync Drive</button>
+              <h3>Google Drive Files</h3>
+              <button onclick="syncDrive()" class="btn btn-sm btn-ghost">&#8635; Sync Drive</button>
             </div>
             <div id="acct-files" class="card-body"></div>
           </div>
         </div>
 
-        <!-- Activity Log Tab ────────────────────────────────────── -->
         <div id="tab-activity" class="tab-panel">
           <div class="card">
             <div class="card-header">
@@ -237,6 +240,17 @@
         <button onclick="closeModal()" class="icon-btn">&times;</button>
       </div>
       <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- ── Setup Wizard Overlay ──────────────────────────────────────── -->
+  <div id="setup-wizard-overlay" class="wizard-overlay hidden">
+    <div class="wizard-panel">
+      <div class="wizard-header">
+        <h2>Welcome to Account Hub</h2>
+        <p>Let's get everything connected in just a few steps.</p>
+      </div>
+      <div id="wizard-body"></div>
     </div>
   </div>
 

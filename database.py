@@ -162,7 +162,7 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_comms_account ON communications(account_id, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comms_contact ON communications(contact_id, occurred_at DESC);
 
-    -- ── OneDrive File References ───────────────────────────────────────
+    -- ── Drive File References (Google Drive or OneDrive) ───────────────
     CREATE TABLE IF NOT EXISTS onedrive_files (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -173,6 +173,13 @@ def init_db():
         modified_at TEXT,
         mime_type   TEXT,
         UNIQUE(account_id, file_id)
+    );
+
+    -- ── App Settings (key/value store for integration credentials) ─────
+    CREATE TABLE IF NOT EXISTS settings (
+        key        TEXT PRIMARY KEY,
+        value      TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
     );
     """)
 
@@ -196,6 +203,36 @@ def _migrate(conn):
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
+
+
+# ── Settings (key/value store for integration credentials) ────────────────────
+
+def get_setting(key: str, default: str = None) -> str | None:
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str | None):
+    conn = get_conn()
+    if value is None:
+        conn.execute("DELETE FROM settings WHERE key=?", (key,))
+    else:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (key, value),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_all_settings() -> dict:
+    conn = get_conn()
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    conn.close()
+    return {r["key"]: r["value"] for r in rows}
 
 
 # ── Hospital Systems ──────────────────────────────────────────────────────────

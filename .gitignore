@@ -3,4 +3,5 @@ __pycache__/
 *.db
 .ms_token.json
 .env
-
+*.egg-info/
+.DS_Store

@@ -254,14 +254,22 @@ function renderSyncLabel() {
 }
 
 // ── View switching ─────────────────────────────────────────────────────
+function _hideAllViews() {
+  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+}
 function showDashboard() {
   STATE.currentAccountId = null; STATE.currentAccountData = null;
+  _hideAllViews();
   document.getElementById("view-dashboard").classList.add("active");
-  document.getElementById("view-account").classList.remove("active");
   renderSidebar();
 }
+function showIntegrations() {
+  _hideAllViews();
+  document.getElementById("view-integrations").classList.add("active");
+  loadIntegrationsPage();
+}
 function showAccountView() {
-  document.getElementById("view-dashboard").classList.remove("active");
+  _hideAllViews();
   document.getElementById("view-account").classList.add("active");
   activateTab("tab-overview");
 }
@@ -1091,10 +1099,12 @@ async function syncNotes() {
   try { const r = await post("/api/sync/notes",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
-async function syncOneDrive() {
-  try { const r = await post("/api/sync/onedrive",{}); toast(r.message,"info"); }
+async function syncDrive() {
+  try { const r = await post("/api/sync/drive",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
+// keep old name working
+async function syncOneDrive() { return syncDrive(); }
 async function synciMessage() {
   try { const r = await post("/api/sync/imessage",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
@@ -1102,6 +1112,507 @@ async function synciMessage() {
 async function syncSalesforce() {
   try { const r = await post("/api/sync/salesforce",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   INTEGRATIONS PAGE
+   ══════════════════════════════════════════════════════════════════════ */
+
+let _intStatus = null;
+
+async function loadIntegrationsPage() {
+  const body = document.getElementById("integrations-body");
+  body.innerHTML = `<div class="integration-loading">Loading…</div>`;
+  try {
+    _intStatus = await api("/api/integrations/status");
+    renderIntegrationsPage(_intStatus);
+    updateIntegrationsNavButton(_intStatus);
+  } catch(e) {
+    body.innerHTML = `<div class="integration-loading">Failed to load: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function updateIntegrationsNavButton(status) {
+  const btn = document.getElementById("integrations-nav-btn");
+  if (!status) return;
+  const needsAttention = !status.google?.connected || !status.setup_complete;
+  btn.classList.toggle("needs-attention", needsAttention);
+}
+
+function renderIntegrationsPage(s) {
+  const body = document.getElementById("integrations-body");
+  body.innerHTML = [
+    renderGoogleCard(s.google),
+    renderSalesforceCard(s.salesforce),
+    renderEmailParserCard(s.email_parser),
+    renderiMessageCard(s.imessage),
+    renderAppleNotesCard(s.apple_notes),
+  ].join("");
+}
+
+function renderGoogleCard(g) {
+  const connected = g?.connected;
+  const statusHtml = connected
+    ? `<span class="integration-status connected"><span class="status-dot"></span>Connected</span>`
+    : `<span class="integration-status not-connected"><span class="status-dot"></span>Not connected</span>`;
+
+  const coversHtml = (g?.covers||[]).map(c => `<span class="cover-chip">${escHtml(c)}</span>`).join("");
+
+  const bodyHtml = connected
+    ? `<div class="integration-connected-as">Signed in as <strong>${escHtml(g.email||"Google Account")}</strong></div>
+       <div class="integration-covers">${coversHtml}</div>
+       <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+         Gmail, Google Drive, and Google Sheets are all available with this connection.
+       </p>
+       <div class="integration-actions">
+         <button class="btn btn-danger btn-sm" onclick="googleDisconnect()">Disconnect</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncEmail()">&#9993; Sync Email Now</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncDrive()">&#128196; Sync Drive Now</button>
+       </div>`
+    : `<div class="integration-steps">
+         <p style="margin-bottom:10px">To connect Google, you need a free Google Cloud project. Here's how:</p>
+         <ol>
+           <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a></li>
+           <li>Create a new project (any name, e.g. "AccountHub")</li>
+           <li>Click <strong>APIs & Services → Enable APIs</strong> — enable Gmail API, Drive API, and Sheets API</li>
+           <li>Click <strong>APIs & Services → OAuth consent screen</strong> → External → fill in your app name</li>
+           <li>Click <strong>Credentials → Create Credentials → OAuth 2.0 Client ID</strong> → Web application</li>
+           <li>Under <em>Authorized redirect URIs</em>, add: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
+           <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> and paste them below</li>
+         </ol>
+       </div>
+       <div class="integration-form">
+         <div class="form-group">
+           <label>Google Client ID</label>
+           <input type="text" id="g-client-id" placeholder="…apps.googleusercontent.com">
+         </div>
+         <div class="form-group">
+           <label>Google Client Secret</label>
+           <input type="password" id="g-client-secret" placeholder="GOCSPX-…">
+         </div>
+       </div>
+       <div class="integration-actions">
+         <button class="btn btn-primary" onclick="googleSaveAndConnect()">Save & Connect Google</button>
+       </div>`;
+
+  return `<div class="integration-card ${connected?'connected':''}">
+    <div class="integration-card-header">
+      <span class="integration-icon">🔵</span>
+      <div class="integration-info">
+        <div class="integration-name">Google Account</div>
+        <div class="integration-desc">Gmail + Google Drive + Google Sheets</div>
+      </div>
+      ${statusHtml}
+    </div>
+    <div class="integration-body">${bodyHtml}</div>
+  </div>`;
+}
+
+async function googleSaveAndConnect() {
+  const cid  = document.getElementById("g-client-id")?.value?.trim();
+  const csec = document.getElementById("g-client-secret")?.value?.trim();
+  if (!cid || !csec) { toast("Please enter both Client ID and Client Secret", "error"); return; }
+  try {
+    await post("/api/settings", { google_client_id: cid, google_client_secret: csec });
+    toast("Credentials saved — redirecting to Google…", "info");
+    setTimeout(() => { window.location.href = "/integrations/google/start"; }, 800);
+  } catch(e) { toast("Failed to save: " + e.message, "error"); }
+}
+
+async function googleDisconnect() {
+  if (!confirm("Disconnect your Google account? Email and Drive sync will stop working.")) return;
+  try {
+    await post("/integrations/google/disconnect", {});
+    toast("Google account disconnected", "info");
+    loadIntegrationsPage();
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+function renderSalesforceCard(sf) {
+  const configured = sf?.configured;
+  const statusHtml = configured
+    ? `<span class="integration-status connected"><span class="status-dot"></span>Connected</span>`
+    : `<span class="integration-status not-connected"><span class="status-dot"></span>Not connected</span>`;
+
+  const bodyHtml = `
+    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+      Salesforce is optional. If connected, contacts and opportunity data are pulled in automatically.
+    </p>
+    <div class="integration-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Salesforce Username</label>
+          <input type="text" id="sf-username" placeholder="you@company.com" value="${escHtml(sf?.username||'')}">
+        </div>
+        <div class="form-group">
+          <label>Domain</label>
+          <input type="text" id="sf-domain" placeholder="login" value="login">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" id="sf-password" placeholder="••••••••">
+        </div>
+        <div class="form-group">
+          <label>Security Token <span style="font-weight:400;color:var(--text-muted)">(from SF settings)</span></label>
+          <input type="password" id="sf-token" placeholder="••••••••">
+        </div>
+      </div>
+    </div>
+    <div class="integration-actions">
+      <button class="btn btn-primary btn-sm" onclick="salesforceTest()">Test & Save</button>
+      ${configured ? `<button class="btn btn-danger btn-sm" onclick="salesforceDisconnect()">Disconnect</button>` : ""}
+      <button class="btn btn-sm btn-ghost" onclick="syncSalesforce()">&#9729; Sync Now</button>
+    </div>`;
+
+  return `<div class="integration-card ${configured?'connected':''}">
+    <div class="integration-card-header">
+      <span class="integration-icon">☁️</span>
+      <div class="integration-info">
+        <div class="integration-name">Salesforce</div>
+        <div class="integration-desc">Contacts, accounts, and opportunity data</div>
+      </div>
+      ${statusHtml}
+    </div>
+    <div class="integration-body">${bodyHtml}</div>
+  </div>`;
+}
+
+async function salesforceTest() {
+  const username = document.getElementById("sf-username")?.value?.trim();
+  const password = document.getElementById("sf-password")?.value?.trim();
+  const token    = document.getElementById("sf-token")?.value?.trim();
+  const domain   = document.getElementById("sf-domain")?.value?.trim() || "login";
+  if (!username || !password) { toast("Username and password are required", "error"); return; }
+  toast("Testing connection…", "info");
+  try {
+    const r = await post("/integrations/salesforce/test", { username, password, security_token: token, domain });
+    if (r.ok) { toast(r.message, "success"); loadIntegrationsPage(); }
+    else toast(r.message, "error");
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+async function salesforceDisconnect() {
+  if (!confirm("Disconnect Salesforce?")) return;
+  try {
+    await post("/integrations/salesforce/disconnect", {});
+    toast("Salesforce disconnected", "info");
+    loadIntegrationsPage();
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+function renderEmailParserCard(ep) {
+  return `<div class="integration-card connected">
+    <div class="integration-card-header">
+      <span class="integration-icon">📧</span>
+      <div class="integration-info">
+        <div class="integration-name">Email Report Parser</div>
+        <div class="integration-desc">Parses Haemonetics/Tableau report emails</div>
+      </div>
+      <span class="integration-status connected"><span class="status-dot"></span>Active</span>
+    </div>
+    <div class="integration-body">
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+        Automatically parses sales report emails forwarded to your Gmail.
+        <strong>${escHtml(String(ep?.emails_parsed||0))}</strong> emails parsed so far.
+      </p>
+      <div class="form-group">
+        <label>Report sender email addresses <span style="font-weight:400;color:var(--text-muted)">(comma-separated)</span></label>
+        <input type="text" id="report-senders" value="${escHtml(ep?.report_senders||'')}"
+          placeholder="tableau-no-reply@haemonetics.com">
+      </div>
+      <div class="integration-note" style="margin-bottom:12px">
+        &#128161; Set up <strong>email forwarding</strong> in Outlook to send report emails to your Gmail address automatically.
+        In Outlook → Settings → Mail → Forwarding → enter your Gmail address.
+      </div>
+      <div class="integration-actions">
+        <button class="btn btn-primary btn-sm" onclick="saveReportSenders()">Save Sender Filter</button>
+        <button class="btn btn-sm btn-ghost" onclick="syncEmail()">&#9993; Sync Emails Now</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function saveReportSenders() {
+  const val = document.getElementById("report-senders")?.value?.trim();
+  if (!val) { toast("Please enter at least one sender address", "error"); return; }
+  try {
+    await post("/api/settings", { report_senders: val });
+    toast("Sender filter saved", "success");
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+function renderiMessageCard(im) {
+  const available = im?.available;
+  return `<div class="integration-card">
+    <div class="integration-card-header">
+      <span class="integration-icon">💬</span>
+      <div class="integration-info">
+        <div class="integration-name">iMessage Sync</div>
+        <div class="integration-desc">Pull text history with contacts (Mac only)</div>
+      </div>
+      <span class="integration-status ${available?'not-connected':'unavailable'}">
+        <span class="status-dot"></span>${available?'Available':'Mac Only'}
+      </span>
+    </div>
+    <div class="integration-body">
+      ${available
+        ? `<p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+             iMessage sync reads your message history from this Mac and links conversations to account contacts.
+           </p>
+           <div class="integration-actions">
+             <button class="btn btn-sm btn-ghost" onclick="synciMessage()">&#128172; Sync iMessage Now</button>
+           </div>`
+        : `<div class="integration-note">${escHtml(im?.platform_note||"Requires a Mac.")}</div>`
+      }
+    </div>
+  </div>`;
+}
+
+function renderAppleNotesCard(an) {
+  const available = an?.available;
+  return `<div class="integration-card">
+    <div class="integration-card-header">
+      <span class="integration-icon">📝</span>
+      <div class="integration-info">
+        <div class="integration-name">Apple Notes</div>
+        <div class="integration-desc">Sync notes from the Notes app (Mac only)</div>
+      </div>
+      <span class="integration-status ${available?'not-connected':'unavailable'}">
+        <span class="status-dot"></span>${available?'Available':'Mac Only'}
+      </span>
+    </div>
+    <div class="integration-body">
+      ${available
+        ? `<p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+             Reads notes from your Apple Notes app and links them to matching accounts.
+           </p>
+           <div class="integration-actions">
+             <button class="btn btn-sm btn-ghost" onclick="syncNotes()">&#128221; Sync Notes Now</button>
+           </div>`
+        : `<div class="integration-note">${escHtml(an?.platform_note||"Requires a Mac.")}</div>`
+      }
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SETUP WIZARD
+   ══════════════════════════════════════════════════════════════════════ */
+
+const WIZARD_STEPS = ["welcome", "google", "salesforce", "email", "done"];
+let _wizardStep = 0;
+
+function showSetupWizard() {
+  _wizardStep = 0;
+  document.getElementById("setup-wizard-overlay").classList.remove("hidden");
+  renderWizardStep();
+}
+
+function hideSetupWizard() {
+  document.getElementById("setup-wizard-overlay").classList.add("hidden");
+}
+
+async function completeSetupWizard() {
+  await post("/api/settings", { setup_complete: "1" }).catch(() => {});
+  hideSetupWizard();
+  toast("Setup complete! You're ready to go.", "success");
+  loadIntegrationsPage();
+}
+
+function renderWizardStep() {
+  const body   = document.getElementById("wizard-body");
+  const step   = WIZARD_STEPS[_wizardStep];
+  const isLast = _wizardStep === WIZARD_STEPS.length - 1;
+
+  // Progress dots
+  const dots = WIZARD_STEPS.map((_, i) => {
+    const cls = i < _wizardStep ? "done" : i === _wizardStep ? "active" : "";
+    return `<span class="wizard-dot ${cls}"></span>`;
+  }).join("");
+  document.querySelector(".wizard-progress")?.remove();
+  const hdr = document.querySelector(".wizard-header");
+  if (hdr) {
+    let prog = document.createElement("div");
+    prog.className = "wizard-progress";
+    prog.innerHTML = dots;
+    hdr.after(prog);
+  }
+
+  const steps = {
+    welcome: {
+      title: "Welcome to Account Hub",
+      sub:   "This app helps you track your hospital accounts, TEG machines, sales data, and communications — all in one place.",
+      html:  `<p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.7">
+                To get the most out of Account Hub, we'll connect a few things:<br><br>
+                ✅ <strong>Google Account</strong> — so your report emails and Drive files sync automatically<br>
+                ⚡ <strong>Salesforce</strong> (optional) — pulls your contacts and opportunities<br>
+                📧 <strong>Email filter</strong> — tells the app which report emails to parse
+              </p>`,
+      next:  "Let's Start",
+      skip:  null,
+    },
+    google: {
+      title: "Connect Your Google Account",
+      sub:   "One Google login covers Gmail (for report emails), Google Drive (for files), and Google Sheets.",
+      html:  `<div class="integration-steps">
+                <ol>
+                  <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a> (free)</li>
+                  <li>Create a project → Enable Gmail API, Drive API, and Sheets API</li>
+                  <li>Create OAuth 2.0 credentials → Web application</li>
+                  <li>Add this redirect URI: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
+                  <li>Paste your Client ID and Secret below</li>
+                </ol>
+              </div>
+              <div class="form-group"><label>Google Client ID</label>
+                <input type="text" id="wiz-g-client-id" placeholder="…apps.googleusercontent.com"></div>
+              <div class="form-group"><label>Google Client Secret</label>
+                <input type="password" id="wiz-g-client-secret" placeholder="GOCSPX-…"></div>
+              <div class="integration-actions" style="margin-top:14px">
+                <button class="btn btn-primary" onclick="wizardSaveAndConnectGoogle()">Save & Connect Google</button>
+              </div>
+              <p style="font-size:0.78rem;color:var(--text-muted);margin-top:10px">
+                Already connected? Click Next below.
+              </p>`,
+      next:  "Next",
+      skip:  "Skip for now",
+    },
+    salesforce: {
+      title: "Salesforce (Optional)",
+      sub:   "If you have Salesforce access, connecting it pulls contacts and opportunities automatically.",
+      html:  `<div class="form-row">
+                <div class="form-group"><label>Username</label>
+                  <input type="text" id="wiz-sf-user" placeholder="you@company.com"></div>
+                <div class="form-group"><label>Password</label>
+                  <input type="password" id="wiz-sf-pass" placeholder="••••••••"></div>
+              </div>
+              <div class="form-group"><label>Security Token <span style="font-weight:400;color:var(--text-muted)">(from Salesforce Settings → Reset Security Token)</span></label>
+                <input type="password" id="wiz-sf-token" placeholder="••••••••"></div>
+              <div class="integration-actions" style="margin-top:14px">
+                <button class="btn btn-sm" onclick="wizardTestSalesforce()">Test & Save</button>
+              </div>`,
+      next:  "Next",
+      skip:  "Skip Salesforce",
+    },
+    email: {
+      title: "Report Email Filter",
+      sub:   "Which email addresses send your Haemonetics/Tableau reports? These will be parsed automatically.",
+      html:  `<div class="form-group">
+                <label>Sender email addresses (comma-separated)</label>
+                <input type="text" id="wiz-senders"
+                  placeholder="tableau-no-reply@haemonetics.com,noreply@haemonetics.com"
+                  value="tableau-no-reply@haemonetics.com">
+              </div>
+              <div class="integration-note" style="margin-top:10px">
+                &#128161; In Outlook, go to <strong>Settings → Mail → Forwarding</strong> and forward all emails to your Gmail address so the app can receive them.
+              </div>`,
+      next:  "Next",
+      skip:  "Skip",
+    },
+    done: {
+      title: "You're All Set! 🎉",
+      sub:   "Account Hub is ready. Here's what to do next:",
+      html:  `<p style="font-size:0.9rem;color:var(--text-secondary);line-height:1.8">
+                ▶ Click <strong>Email</strong> in the top bar to sync your first batch of reports<br>
+                ▶ Use the <strong>+</strong> button in the sidebar to add your accounts<br>
+                ▶ Visit <strong>Integrations</strong> any time to check connection status<br>
+                ▶ The app auto-syncs in the background every day
+              </p>`,
+      next:  "Start Using Account Hub",
+      skip:  null,
+    },
+  };
+
+  const s = steps[step] || steps.welcome;
+  body.innerHTML = `
+    <div class="wizard-step">
+      <div class="wizard-step-title">${s.title}</div>
+      <div class="wizard-step-sub">${s.sub}</div>
+      ${s.html}
+    </div>
+    <div class="wizard-nav">
+      <span class="wizard-skip" onclick="wizardSkip()">${s.skip || ""}</span>
+      <button class="btn btn-primary" onclick="wizardNext()">${s.next}</button>
+    </div>`;
+}
+
+async function wizardNext() {
+  const step = WIZARD_STEPS[_wizardStep];
+  if (step === "email") {
+    const senders = document.getElementById("wiz-senders")?.value?.trim();
+    if (senders) await post("/api/settings", { report_senders: senders }).catch(() => {});
+  }
+  if (step === "done") { completeSetupWizard(); return; }
+  _wizardStep = Math.min(_wizardStep + 1, WIZARD_STEPS.length - 1);
+  renderWizardStep();
+}
+
+function wizardSkip() {
+  if (WIZARD_STEPS[_wizardStep] === "done") { completeSetupWizard(); return; }
+  _wizardStep = Math.min(_wizardStep + 1, WIZARD_STEPS.length - 1);
+  renderWizardStep();
+}
+
+async function wizardSaveAndConnectGoogle() {
+  const cid  = document.getElementById("wiz-g-client-id")?.value?.trim();
+  const csec = document.getElementById("wiz-g-client-secret")?.value?.trim();
+  if (!cid || !csec) { toast("Please enter both Client ID and Client Secret", "error"); return; }
+  try {
+    await post("/api/settings", { google_client_id: cid, google_client_secret: csec });
+    toast("Credentials saved — redirecting to Google…", "info");
+    setTimeout(() => { window.location.href = "/integrations/google/start"; }, 800);
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+async function wizardTestSalesforce() {
+  const username = document.getElementById("wiz-sf-user")?.value?.trim();
+  const password = document.getElementById("wiz-sf-pass")?.value?.trim();
+  const token    = document.getElementById("wiz-sf-token")?.value?.trim();
+  if (!username || !password) { toast("Enter username and password", "error"); return; }
+  toast("Testing Salesforce connection…", "info");
+  try {
+    const r = await post("/integrations/salesforce/test", { username, password, security_token: token, domain: "login" });
+    if (r.ok) toast(r.message, "success");
+    else toast(r.message, "error");
+  } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+// ── Check for Google OAuth callback result in URL hash ─────────────────
+function checkOAuthCallback() {
+  const hash = window.location.hash;
+  if (hash.includes("google_connected=1")) {
+    toast("Google account connected successfully!", "success");
+    history.replaceState(null, "", "/");
+    showIntegrations();
+    // Advance wizard if it's open
+    if (!document.getElementById("setup-wizard-overlay").classList.contains("hidden")) {
+      _wizardStep = Math.max(_wizardStep, WIZARD_STEPS.indexOf("salesforce"));
+      renderWizardStep();
+    }
+    return;
+  }
+  if (hash.includes("google_error=")) {
+    const msg = decodeURIComponent(hash.split("google_error=")[1] || "unknown error");
+    toast("Google connection failed: " + msg, "error");
+    history.replaceState(null, "", "/");
+  }
+  if (hash.includes("integrations")) {
+    showIntegrations();
+    history.replaceState(null, "", "/");
+  }
+}
+
+// ── Auto-show setup wizard on first run ────────────────────────────────
+async function checkFirstRun() {
+  try {
+    const status = await api("/api/integrations/status");
+    _intStatus = status;
+    updateIntegrationsNavButton(status);
+    if (!status.setup_complete) {
+      showSetupWizard();
+    }
+  } catch(e) { /* ignore */ }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -1115,4 +1626,8 @@ document.addEventListener("keydown", e => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────
-loadDashboard();
+(async () => {
+  await loadDashboard();
+  checkOAuthCallback();
+  await checkFirstRun();
+})();

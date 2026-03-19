@@ -1,7 +1,9 @@
 """
-Email ingestion via Microsoft Graph API.
-Pulls daily sales report emails from Haemonetics/Tableau, parses HTML tables,
+Email ingestion — fetches daily sales report emails, parses HTML tables,
 stores results in SQLite.
+
+Email source: Gmail (via Google OAuth — connect through the Integrations page).
+Your Outlook emails should be forwarded to your Gmail address.
 
 Handles three email types:
   1. "Yesterday's Sales Report" — per-shipment rows (account, product, units, revenue)
@@ -14,17 +16,13 @@ import logging
 import re
 from datetime import date, datetime, timedelta
 
-import requests
 from bs4 import BeautifulSoup
 from rapidfuzz import process, fuzz
 
 import config
 import database as db
-from integrations.ms_auth import get_access_token
 
 log = logging.getLogger(__name__)
-
-GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 
 # ── Account name resolver ─────────────────────────────────────────────────────
@@ -75,44 +73,16 @@ def _parse_int(s: str) -> int:
     return int(cleaned) if cleaned else 0
 
 
-# ── Microsoft Graph email fetch ───────────────────────────────────────────────
+# ── Gmail fetch ───────────────────────────────────────────────────────────────
 
 def fetch_report_emails(days_back: int = 7) -> list[dict]:
     """
-    Fetch recent emails from the configured report senders.
+    Fetch recent report emails from Gmail.
     Returns list of message dicts with id, subject, receivedDateTime, body.
+    Returns [] gracefully if Google is not connected.
     """
-    token = get_access_token(["Mail.Read", "offline_access"])
-    if not token:
-        log.error("No auth token — run python -m integrations.ms_auth first")
-        return []
-
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    since = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%dT00:00:00Z")
-
-    sender_filters = " or ".join(
-        f"from/emailAddress/address eq '{s}'" for s in config.REPORT_SENDERS
-    )
-    params = {
-        "$filter": f"receivedDateTime ge {since} and ({sender_filters})",
-        "$select": "id,subject,receivedDateTime,from,body",
-        "$top": 50,
-        "$orderby": "receivedDateTime desc",
-    }
-
-    messages = []
-    url = f"{GRAPH_BASE}/me/messages"
-    while url:
-        resp = requests.get(url, headers=headers, params=params if url == f"{GRAPH_BASE}/me/messages" else None)
-        if resp.status_code != 200:
-            log.error("Graph API error %d: %s", resp.status_code, resp.text[:300])
-            break
-        data = resp.json()
-        messages.extend(data.get("value", []))
-        url = data.get("@odata.nextLink")  # handle pagination
-
-    log.info("Fetched %d report emails", len(messages))
-    return messages
+    from integrations.gmail import fetch_report_emails as gmail_fetch
+    return gmail_fetch(days_back=days_back)
 
 
 # ── HTML table parser ─────────────────────────────────────────────────────────
