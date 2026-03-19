@@ -27,14 +27,14 @@ def init_db():
     CREATE TABLE IF NOT EXISTS hospital_systems (
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         name     TEXT NOT NULL UNIQUE,
-        aliases  TEXT DEFAULT '[]'   -- JSON array of alternate names
+        aliases  TEXT DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS accounts (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         system_id   INTEGER REFERENCES hospital_systems(id),
         name        TEXT NOT NULL UNIQUE,
-        aliases     TEXT DEFAULT '[]',   -- JSON array of alternate names / email report names
+        aliases     TEXT DEFAULT '[]',
         address     TEXT,
         city        TEXT,
         state       TEXT,
@@ -44,22 +44,24 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS contacts (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        name        TEXT NOT NULL,
-        role        TEXT,
-        phone       TEXT,
-        email       TEXT,
-        notes       TEXT,
-        updated_at  TEXT DEFAULT (datetime('now'))
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id       INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name             TEXT NOT NULL,
+        role             TEXT,
+        phone            TEXT,
+        email            TEXT,
+        notes            TEXT,
+        imessage_handle  TEXT,   -- phone or email used in iMessage
+        updated_at       TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS products (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         item_number TEXT UNIQUE,
         description TEXT NOT NULL,
-        prod_line   TEXT,   -- TEG, TEG6, HCC-SE6, etc.
-        prod_type   TEXT    -- Disposable, Instrument, etc.
+        prod_line   TEXT,
+        prod_type   TEXT,
+        category    TEXT    -- 'cartridge', 'qc', 'instrument', 'other'
     );
 
     CREATE TABLE IF NOT EXISTS sales (
@@ -69,7 +71,7 @@ def init_db():
         prod_line   TEXT,
         units       INTEGER,
         revenue     REAL,
-        report_date TEXT,   -- ISO date string YYYY-MM-DD
+        report_date TEXT,
         tracking    TEXT,
         carrier     TEXT,
         created_at  TEXT DEFAULT (datetime('now')),
@@ -79,13 +81,13 @@ def init_db():
     CREATE TABLE IF NOT EXISTS revenue_targets (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id      INTEGER REFERENCES accounts(id),
-        period_type     TEXT,    -- month, quarter, year
-        period_label    TEXT,    -- e.g. "2026-Q1", "2026-03"
+        period_type     TEXT,
+        period_label    TEXT,
         actual          REAL,
-        rr_actual       REAL,    -- run-rate actual
+        rr_actual       REAL,
         target          REAL,
         pct_of_target   REAL,
-        py_revenue      REAL,    -- prior year
+        py_revenue      REAL,
         report_date     TEXT,
         UNIQUE(account_id, period_type, period_label, report_date)
     );
@@ -93,7 +95,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS account_notes (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-        source      TEXT NOT NULL,   -- apple_notes, onenote, manual
+        source      TEXT NOT NULL,
         title       TEXT,
         content     TEXT,
         note_date   TEXT,
@@ -101,13 +103,13 @@ def init_db():
     );
 
     CREATE TABLE IF NOT EXISTS email_log (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        subject     TEXT,
-        sender      TEXT,
-        received_at TEXT,
-        parsed_at   TEXT DEFAULT (datetime('now')),
-        status      TEXT DEFAULT 'ok',
-        message_id  TEXT UNIQUE,
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject       TEXT,
+        sender        TEXT,
+        received_at   TEXT,
+        parsed_at     TEXT DEFAULT (datetime('now')),
+        status        TEXT DEFAULT 'ok',
+        message_id    TEXT UNIQUE,
         rows_inserted INTEGER DEFAULT 0
     );
 
@@ -117,10 +119,83 @@ def init_db():
         first_seen  TEXT DEFAULT (datetime('now')),
         resolved_to INTEGER REFERENCES accounts(id)
     );
+
+    -- ── TEG Machine Inventory ──────────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS teg_machines (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id    INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        location      TEXT NOT NULL,       -- e.g. "OR Suite 2", "CVICU Bed 4"
+        department    TEXT,                -- OR, ICU, Cath Lab, ED, NICU, etc.
+        serial_number TEXT,
+        model         TEXT,               -- TEG 5000, TEG 6s, TEGfunctional
+        notes         TEXT,
+        is_active     INTEGER DEFAULT 1,
+        updated_at    TEXT DEFAULT (datetime('now'))
+    );
+
+    -- Cartridge types run on each TEG machine
+    CREATE TABLE IF NOT EXISTS teg_cartridges (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        teg_id          INTEGER NOT NULL REFERENCES teg_machines(id) ON DELETE CASCADE,
+        cartridge_type  TEXT NOT NULL,
+        is_active       INTEGER DEFAULT 1,
+        notes           TEXT,
+        UNIQUE(teg_id, cartridge_type)
+    );
+
+    -- ── Communication Log ─────────────────────────────────────────────
+    -- Tracks texts, calls, emails, visits — sourced from iMessage or manual
+    CREATE TABLE IF NOT EXISTS communications (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id      INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        contact_id      INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+        type            TEXT NOT NULL,     -- imessage, call, email, visit, text
+        occurred_at     TEXT NOT NULL,     -- ISO datetime
+        duration_sec    INTEGER,           -- for calls
+        notes           TEXT,
+        thread_id       TEXT,              -- iMessage chat GUID
+        message_preview TEXT,             -- first 300 chars (for iMessage)
+        is_from_me      INTEGER DEFAULT 1,
+        created_at      TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_comms_account ON communications(account_id, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_comms_contact ON communications(contact_id, occurred_at DESC);
+
+    -- ── OneDrive File References ───────────────────────────────────────
+    CREATE TABLE IF NOT EXISTS onedrive_files (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        file_id     TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        web_url     TEXT,
+        size        INTEGER,
+        modified_at TEXT,
+        mime_type   TEXT,
+        UNIQUE(account_id, file_id)
+    );
     """)
 
     conn.commit()
+
+    # Migrate existing schemas (safe, no-op if column already exists)
+    _migrate(conn)
+
     conn.close()
+
+
+def _migrate(conn):
+    """Add columns that may not exist in older databases."""
+    migrations = [
+        ("contacts", "imessage_handle", "TEXT"),
+        ("products",  "category",        "TEXT"),
+    ]
+    for table, col, typ in migrations:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 # ── Hospital Systems ──────────────────────────────────────────────────────────
@@ -201,7 +276,6 @@ def get_account(account_id: int) -> dict | None:
 
 
 def find_account_by_name(name: str) -> dict | None:
-    """Exact match first, then check aliases JSON."""
     conn = get_conn()
     row = conn.execute("SELECT * FROM accounts WHERE name=?", (name,)).fetchone()
     if row:
@@ -209,7 +283,6 @@ def find_account_by_name(name: str) -> dict | None:
         d = dict(row)
         d["aliases"] = json.loads(d.get("aliases") or "[]")
         return d
-    # search aliases
     rows = conn.execute("SELECT * FROM accounts").fetchall()
     conn.close()
     for r in rows:
@@ -222,7 +295,6 @@ def find_account_by_name(name: str) -> dict | None:
 
 
 def get_all_account_names_and_aliases() -> list[tuple[str, int]]:
-    """Return [(name_or_alias, account_id), ...] for fuzzy matching."""
     conn = get_conn()
     rows = conn.execute("SELECT id, name, aliases FROM accounts").fetchall()
     conn.close()
@@ -261,12 +333,13 @@ def get_contacts(account_id: int) -> list[dict]:
 
 
 def add_contact(account_id: int, name: str, role: str = None,
-                phone: str = None, email: str = None, notes: str = None) -> int:
+                phone: str = None, email: str = None, notes: str = None,
+                imessage_handle: str = None) -> int:
     conn = get_conn()
     c = conn.execute("""
-        INSERT INTO contacts (account_id, name, role, phone, email, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (account_id, name, role, phone, email, notes))
+        INSERT INTO contacts (account_id, name, role, phone, email, notes, imessage_handle)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (account_id, name, role, phone, email, notes, imessage_handle))
     conn.commit()
     contact_id = c.lastrowid
     conn.close()
@@ -274,7 +347,7 @@ def add_contact(account_id: int, name: str, role: str = None,
 
 
 def update_contact(contact_id: int, **kwargs):
-    allowed = {"name", "role", "phone", "email", "notes"}
+    allowed = {"name", "role", "phone", "email", "notes", "imessage_handle"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return
@@ -295,17 +368,39 @@ def delete_contact(contact_id: int):
 
 # ── Products ──────────────────────────────────────────────────────────────────
 
+def classify_product(description: str, item_number: str = "", prod_type: str = "") -> str:
+    """Classify a product as cartridge, qc, instrument, or other."""
+    d = (description or "").lower()
+    i = (item_number or "").upper()
+    t = (prod_type or "").lower()
+    if ("quality control" in d or "control material" in d or "qc" in i
+            or d.startswith("qc ") or " qc " in d):
+        return "qc"
+    if ("analyzer" in d or "instrument" in t or "machine" in d or
+            "teg 5000 system" in d or "teg 6s system" in d):
+        return "instrument"
+    if any(x in d for x in ("kaolin", "heparinase", "rapidteg", "platelet map",
+                              "functional fibrinogen", "citrated", "cff", "delta",
+                              "cartridge", "cup", "pin", "cuvette")):
+        return "cartridge"
+    return "other"
+
+
 def upsert_product(item_number: str, description: str,
-                   prod_line: str = None, prod_type: str = None) -> int:
+                   prod_line: str = None, prod_type: str = None,
+                   category: str = None) -> int:
+    if not category:
+        category = classify_product(description, item_number, prod_type)
     conn = get_conn()
     conn.execute("""
-        INSERT INTO products (item_number, description, prod_line, prod_type)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO products (item_number, description, prod_line, prod_type, category)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(item_number) DO UPDATE SET
             description=excluded.description,
             prod_line=excluded.prod_line,
-            prod_type=excluded.prod_type
-    """, (item_number, description, prod_line, prod_type))
+            prod_type=excluded.prod_type,
+            category=COALESCE(excluded.category, category)
+    """, (item_number, description, prod_line, prod_type, category))
     conn.commit()
     row = conn.execute("SELECT id FROM products WHERE item_number=?",
                        (item_number,)).fetchone()
@@ -318,7 +413,6 @@ def upsert_product(item_number: str, description: str,
 def insert_sale(account_id: int, product_id: int, prod_line: str,
                 units: int, revenue: float, report_date: str,
                 tracking: str = None, carrier: str = None) -> bool:
-    """Returns True if inserted, False if duplicate."""
     conn = get_conn()
     try:
         conn.execute("""
@@ -337,12 +431,24 @@ def insert_sale(account_id: int, product_id: int, prod_line: str,
 
 
 def get_account_sales_summary(account_id: int, days: int = 90) -> list[dict]:
-    """Product-level rollup for the last N days."""
     since = (date.today() - timedelta(days=days)).isoformat()
     conn = get_conn()
     rows = conn.execute("""
         SELECT p.description, p.prod_line, p.prod_type, p.item_number,
-               SUM(s.units) as total_units, SUM(s.revenue) as total_revenue,
+               COALESCE(p.category,
+                 CASE
+                   WHEN upper(p.item_number) LIKE '%QC%'
+                     OR lower(p.description) LIKE '%quality control%'
+                     OR lower(p.description) LIKE '%control material%'
+                   THEN 'qc'
+                   WHEN p.prod_type = 'Instrument'
+                     OR lower(p.description) LIKE '%analyzer%'
+                   THEN 'instrument'
+                   ELSE 'cartridge'
+                 END
+               ) as category,
+               SUM(s.units) as total_units,
+               SUM(s.revenue) as total_revenue,
                MAX(s.report_date) as last_order_date
         FROM sales s
         JOIN products p ON s.product_id = p.id
@@ -352,6 +458,23 @@ def get_account_sales_summary(account_id: int, days: int = 90) -> list[dict]:
     """, (account_id, since)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_cartridge_summary(account_id: int, days: int = 90) -> dict:
+    """Returns {'cartridges': [...], 'qc': [...]} for the account homepage tally."""
+    all_sales = get_account_sales_summary(account_id, days)
+    cartridges = [s for s in all_sales if s["category"] == "cartridge"]
+    qc = [s for s in all_sales if s["category"] == "qc"]
+    other = [s for s in all_sales if s["category"] not in ("cartridge", "qc")]
+    return {
+        "cartridges": cartridges,
+        "qc": qc,
+        "other": other,
+        "total_cartridge_units": sum(s["total_units"] or 0 for s in cartridges),
+        "total_cartridge_revenue": sum(s["total_revenue"] or 0 for s in cartridges),
+        "total_qc_units": sum(s["total_units"] or 0 for s in qc),
+        "total_qc_revenue": sum(s["total_revenue"] or 0 for s in qc),
+    }
 
 
 def get_account_last_order_date(account_id: int) -> str | None:
@@ -364,11 +487,19 @@ def get_account_last_order_date(account_id: int) -> str | None:
     return row["last"] if row else None
 
 
-def get_recent_orders(account_id: int, limit: int = 10) -> list[dict]:
+def get_recent_orders(account_id: int, limit: int = 15) -> list[dict]:
     conn = get_conn()
     rows = conn.execute("""
         SELECT s.report_date, s.units, s.revenue, s.tracking, s.carrier,
-               p.description, p.prod_line, p.item_number
+               p.description, p.prod_line, p.item_number,
+               COALESCE(p.category,
+                 CASE
+                   WHEN upper(p.item_number) LIKE '%QC%'
+                     OR lower(p.description) LIKE '%quality control%'
+                   THEN 'qc'
+                   ELSE 'cartridge'
+                 END
+               ) as category
         FROM sales s
         JOIN products p ON s.product_id = p.id
         WHERE s.account_id = ?
@@ -380,7 +511,6 @@ def get_recent_orders(account_id: int, limit: int = 10) -> list[dict]:
 
 
 def get_all_accounts_sales_summary() -> list[dict]:
-    """Aggregate stats for every account — used for sidebar health indicators."""
     since_30 = (date.today() - timedelta(days=30)).isoformat()
     conn = get_conn()
     rows = conn.execute("""
@@ -418,7 +548,6 @@ def upsert_revenue_target(account_id: int, period_type: str, period_label: str,
 
 
 def get_latest_targets(account_id: int) -> dict:
-    """Returns most recent month/quarter/year targets."""
     conn = get_conn()
     result = {}
     for period in ("month", "quarter", "year"):
@@ -464,7 +593,192 @@ def get_account_notes(account_id: int) -> list[dict]:
         SELECT * FROM account_notes
         WHERE account_id=?
         ORDER BY updated_at DESC
-        LIMIT 20
+        LIMIT 30
+    """, (account_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── TEG Machine Inventory ─────────────────────────────────────────────────────
+
+def get_tegs(account_id: int) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT m.*,
+               GROUP_CONCAT(c.cartridge_type, '||') as cartridge_types_raw
+        FROM teg_machines m
+        LEFT JOIN teg_cartridges c ON c.teg_id = m.id AND c.is_active = 1
+        WHERE m.account_id = ? AND m.is_active = 1
+        GROUP BY m.id
+        ORDER BY m.department, m.location
+    """, (account_id,)).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        raw = d.pop("cartridge_types_raw", None)
+        d["cartridge_types"] = raw.split("||") if raw else []
+        result.append(d)
+    return result
+
+
+def add_teg(account_id: int, location: str, department: str = None,
+            serial_number: str = None, model: str = None, notes: str = None) -> int:
+    conn = get_conn()
+    c = conn.execute("""
+        INSERT INTO teg_machines (account_id, location, department, serial_number, model, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (account_id, location, department, serial_number, model, notes))
+    conn.commit()
+    teg_id = c.lastrowid
+    conn.close()
+    return teg_id
+
+
+def update_teg(teg_id: int, **kwargs):
+    allowed = {"location", "department", "serial_number", "model", "notes", "is_active"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed}
+    if not fields:
+        return
+    conn = get_conn()
+    sets = ", ".join(f"{k}=?" for k in fields)
+    conn.execute(f"UPDATE teg_machines SET {sets}, updated_at=datetime('now') WHERE id=?",
+                 (*fields.values(), teg_id))
+    conn.commit()
+    conn.close()
+
+
+def delete_teg(teg_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE teg_machines SET is_active=0 WHERE id=?", (teg_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_teg_cartridges(teg_id: int, cartridge_types: list[str]):
+    """Replace all cartridge types for a TEG machine."""
+    conn = get_conn()
+    conn.execute("DELETE FROM teg_cartridges WHERE teg_id=?", (teg_id,))
+    for ct in cartridge_types:
+        ct = ct.strip()
+        if ct:
+            try:
+                conn.execute(
+                    "INSERT INTO teg_cartridges (teg_id, cartridge_type) VALUES (?, ?)",
+                    (teg_id, ct)
+                )
+            except sqlite3.IntegrityError:
+                pass
+    conn.commit()
+    conn.close()
+
+
+def get_account_teg_count(account_id: int) -> int:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT COUNT(*) as n FROM teg_machines WHERE account_id=? AND is_active=1",
+        (account_id,)
+    ).fetchone()
+    conn.close()
+    return row["n"] if row else 0
+
+
+# ── Communications ────────────────────────────────────────────────────────────
+
+def log_communication(account_id: int, comm_type: str, occurred_at: str,
+                      contact_id: int = None, notes: str = None,
+                      duration_sec: int = None, thread_id: str = None,
+                      message_preview: str = None, is_from_me: int = 1) -> int:
+    conn = get_conn()
+    c = conn.execute("""
+        INSERT INTO communications
+            (account_id, contact_id, type, occurred_at, duration_sec,
+             notes, thread_id, message_preview, is_from_me)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (account_id, contact_id, comm_type, occurred_at, duration_sec,
+          notes, thread_id, message_preview, is_from_me))
+    conn.commit()
+    comm_id = c.lastrowid
+    conn.close()
+    return comm_id
+
+
+def get_account_communications(account_id: int, limit: int = 50) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT cm.*, c.name as contact_name, c.role as contact_role
+        FROM communications cm
+        LEFT JOIN contacts c ON cm.contact_id = c.id
+        WHERE cm.account_id = ?
+        ORDER BY cm.occurred_at DESC
+        LIMIT ?
+    """, (account_id, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_comm_stats_per_contact(account_id: int) -> list[dict]:
+    """Frequency stats per contact for the comm activity panel."""
+    conn = get_conn()
+    now_30 = (datetime.now() - timedelta(days=30)).isoformat()
+    now_7 = (datetime.now() - timedelta(days=7)).isoformat()
+
+    rows = conn.execute("""
+        SELECT
+            c.id          as contact_id,
+            c.name        as contact_name,
+            c.role        as contact_role,
+            c.phone       as contact_phone,
+            c.imessage_handle,
+            COUNT(cm.id)  as total_comms,
+            MAX(cm.occurred_at) as last_contact,
+            SUM(CASE WHEN cm.occurred_at >= ? THEN 1 ELSE 0 END) as comms_30d,
+            SUM(CASE WHEN cm.occurred_at >= ? THEN 1 ELSE 0 END) as comms_7d,
+            MAX(CASE WHEN cm.type IN ('imessage','text') THEN cm.occurred_at END) as last_text,
+            MAX(CASE WHEN cm.type = 'call' THEN cm.occurred_at END) as last_call,
+            MAX(CASE WHEN cm.type = 'visit' THEN cm.occurred_at END) as last_visit
+        FROM contacts c
+        LEFT JOIN communications cm ON cm.contact_id = c.id AND cm.account_id = ?
+        WHERE c.account_id = ?
+        GROUP BY c.id
+        ORDER BY last_contact DESC NULLS LAST, c.name
+    """, (now_30, now_7, account_id, account_id)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def imessage_already_synced(thread_id: str, occurred_at: str) -> bool:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT id FROM communications WHERE thread_id=? AND occurred_at=? AND type='imessage'",
+        (thread_id, occurred_at)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+# ── OneDrive Files ────────────────────────────────────────────────────────────
+
+def upsert_onedrive_file(account_id: int, file_id: str, name: str,
+                         web_url: str = None, size: int = None,
+                         modified_at: str = None, mime_type: str = None):
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO onedrive_files (account_id, file_id, name, web_url, size, modified_at, mime_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_id, file_id) DO UPDATE SET
+            name=excluded.name, web_url=excluded.web_url,
+            size=excluded.size, modified_at=excluded.modified_at
+    """, (account_id, file_id, name, web_url, size, modified_at, mime_type))
+    conn.commit()
+    conn.close()
+
+
+def get_onedrive_files(account_id: int) -> list[dict]:
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT * FROM onedrive_files WHERE account_id=?
+        ORDER BY modified_at DESC
     """, (account_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -520,9 +834,8 @@ def get_unmatched() -> list[dict]:
 
 def resolve_unmatched(raw_name: str, account_id: int):
     conn = get_conn()
-    conn.execute("""
-        UPDATE unmatched_accounts SET resolved_to=? WHERE raw_name=?
-    """, (account_id, raw_name))
+    conn.execute("UPDATE unmatched_accounts SET resolved_to=? WHERE raw_name=?",
+                 (account_id, raw_name))
     conn.commit()
     conn.close()
     add_alias_to_account(account_id, raw_name)
@@ -538,7 +851,6 @@ def compute_alerts() -> list[dict]:
     for acct in accounts:
         acct_id = acct["id"]
 
-        # Check revenue target shortfall
         targets = get_latest_targets(acct_id)
         month_t = targets.get("month")
         if month_t and month_t.get("target") and month_t["target"] > 0:
@@ -550,11 +862,10 @@ def compute_alerts() -> list[dict]:
                     "account_id": acct_id,
                     "account_name": acct["name"],
                     "type": "revenue",
-                    "message": f"{acct['name']}: {pct:.1f}% of monthly target — "
-                               f"${shortfall:,.0f} gap remaining",
+                    "message": (f"{acct['name']}: {pct:.1f}% of monthly target — "
+                                f"${shortfall:,.0f} gap remaining"),
                 })
 
-        # Check days since last order
         last_order = get_account_last_order_date(acct_id)
         if last_order:
             days_since = (today - date.fromisoformat(last_order)).days
@@ -564,16 +875,15 @@ def compute_alerts() -> list[dict]:
                     "account_id": acct_id,
                     "account_name": acct["name"],
                     "type": "reorder",
-                    "message": f"{acct['name']}: no orders in {days_since} days — "
-                               f"reorder likely due",
+                    "message": (f"{acct['name']}: no orders in {days_since} days — "
+                                f"reorder likely due"),
                 })
 
-    # Sort: critical first
     alerts.sort(key=lambda a: (0 if a["level"] == "critical" else 1, a["account_name"]))
     return alerts
 
 
-# ── Dashboard Summary (single query for fast page load) ──────────────────────
+# ── Dashboard Summary ─────────────────────────────────────────────────────────
 
 def get_dashboard_data() -> dict:
     accounts = get_all_accounts()
@@ -582,12 +892,12 @@ def get_dashboard_data() -> dict:
     sales_by_id = {r["id"]: r for r in sales_summary}
     unmatched = get_unmatched()
 
-    # Annotate each account with 30-day revenue + last order
     for acct in accounts:
         summary = sales_by_id.get(acct["id"], {})
         acct["revenue_30d"] = summary.get("revenue_30d", 0)
         acct["units_30d"] = summary.get("units_30d", 0)
         acct["last_order"] = summary.get("last_order")
+        acct["teg_count"] = get_account_teg_count(acct["id"])
         targets = get_latest_targets(acct["id"])
         acct["targets"] = targets
 

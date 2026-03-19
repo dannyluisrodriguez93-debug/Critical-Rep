@@ -7,10 +7,11 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <!-- ── Top Bar ─────────────────────────────────────────────────── -->
+
+  <!-- ── Top Bar ──────────────────────────────────────────────────── -->
   <header id="topbar">
     <div class="topbar-left">
-      <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar">&#9776;</button>
+      <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar (Ctrl+B)">&#9776;</button>
       <h1 class="logo">Account<span>Hub</span></h1>
     </div>
     <div class="topbar-center">
@@ -19,94 +20,154 @@
     <div class="topbar-right">
       <span id="last-sync" class="sync-label"></span>
       <div class="sync-actions">
-        <button onclick="syncEmail()" class="btn btn-sm" title="Sync emails">&#9993; Email</button>
-        <button onclick="syncNotes()" class="btn btn-sm" title="Sync notes">&#128221; Notes</button>
+        <button onclick="syncEmail()"      class="btn btn-sm" title="Sync email reports">&#9993; Email</button>
+        <button onclick="syncNotes()"      class="btn btn-sm" title="Sync Apple Notes + OneNote">&#128221; Notes</button>
+        <button onclick="syncOneDrive()"   class="btn btn-sm" title="Sync OneDrive files">&#128196; Drive</button>
+        <button onclick="synciMessage()"   class="btn btn-sm" title="Sync iMessage history">&#128172; iMsg</button>
         <button onclick="syncSalesforce()" class="btn btn-sm" title="Sync Salesforce">&#9729; SF</button>
       </div>
     </div>
   </header>
 
   <div id="app-shell">
-    <!-- ── Sidebar ─────────────────────────────────────────────── -->
+
+    <!-- ── Sidebar ────────────────────────────────────────────────── -->
     <aside id="sidebar">
       <div class="sidebar-header">
-        <input type="text" id="account-search" placeholder="Search accounts..." autocomplete="off">
-        <button id="btn-add-account" class="btn btn-primary btn-sm" title="Add account">+ New</button>
+        <input type="text" id="account-search" placeholder="Search… (Ctrl+K)" autocomplete="off">
+        <button id="btn-add-account" class="btn btn-primary btn-sm">+</button>
       </div>
       <nav id="account-list" class="account-list"></nav>
     </aside>
 
-    <!-- ── Main Content ────────────────────────────────────────── -->
+    <!-- ── Main ───────────────────────────────────────────────────── -->
     <main id="main">
-      <!-- Dashboard Overview (default view) -->
+
+      <!-- ═══ DASHBOARD OVERVIEW ════════════════════════════════════ -->
       <section id="view-dashboard" class="view active">
         <div class="view-header">
           <h2>Dashboard</h2>
+          <div class="view-header-actions">
+            <button onclick="loadDashboard()" class="btn btn-sm btn-ghost">&#8635; Refresh</button>
+          </div>
         </div>
         <div id="kpi-row" class="kpi-row"></div>
         <div class="grid-2">
-          <div class="card" id="alerts-card">
+          <div class="card">
             <div class="card-header">
-              <h3>Alerts</h3>
-              <span id="alert-count" class="badge">0</span>
+              <h3>Active Alerts</h3><span id="alert-count" class="badge">0</span>
             </div>
             <div id="alerts-list" class="card-body scrollable"></div>
           </div>
-          <div class="card" id="unmatched-card">
+          <div class="card">
             <div class="card-header">
-              <h3>Unmatched Accounts</h3>
-              <span id="unmatched-count" class="badge">0</span>
+              <h3>Unmatched Accounts</h3><span id="unmatched-count" class="badge">0</span>
             </div>
             <div id="unmatched-list" class="card-body scrollable"></div>
           </div>
         </div>
-        <div class="card" id="top-accounts-card">
-          <div class="card-header"><h3>Top Accounts (30-Day Revenue)</h3></div>
+        <div class="card">
+          <div class="card-header"><h3>Top Accounts — 30-Day Revenue</h3></div>
           <div id="top-accounts-table" class="card-body"></div>
         </div>
       </section>
 
-      <!-- Account Detail View -->
+      <!-- ═══ ACCOUNT HOMEPAGE ═══════════════════════════════════════ -->
       <section id="view-account" class="view">
-        <div class="view-header">
-          <button onclick="showDashboard()" class="btn btn-ghost">&larr; Dashboard</button>
-          <div>
-            <h2 id="acct-name"></h2>
-            <span id="acct-system" class="subtitle"></span>
+
+        <!-- Account Hero ─────────────────────────────────────────── -->
+        <div id="acct-hero" class="acct-hero">
+          <div class="acct-hero-back">
+            <button onclick="showDashboard()" class="btn btn-ghost btn-sm">&larr; Dashboard</button>
           </div>
-          <div class="acct-meta">
-            <span id="acct-territory" class="tag"></span>
-            <span id="acct-location" class="subtitle"></span>
+          <div class="acct-hero-main">
+            <div class="acct-hero-identity">
+              <h2 id="acct-name"></h2>
+              <span id="acct-system" class="acct-system-label"></span>
+              <span id="acct-location" class="acct-location-label"></span>
+            </div>
+            <div class="acct-hero-badges">
+              <span id="acct-territory"   class="hero-badge blue hidden"></span>
+              <span id="acct-teg-count"   class="hero-badge teal hidden"></span>
+              <span id="acct-last-order"  class="hero-badge green hidden"></span>
+              <span id="acct-target-pct"  class="hero-badge orange hidden"></span>
+            </div>
           </div>
+          <!-- Quick KPI strip (always visible) -->
+          <div id="acct-kpi-row" class="kpi-row acct-kpi-strip"></div>
         </div>
 
-        <!-- Account Tabs -->
+        <!-- Inventory + Tally + Comms Grid ─────────────────────── -->
+        <div class="account-grid3">
+
+          <!-- TEG Inventory -->
+          <div class="card panel-teg">
+            <div class="card-header">
+              <h3>TEG Inventory</h3>
+              <div class="card-header-actions">
+                <span id="teg-total-count" class="badge teal">0</span>
+                <button onclick="showAddTEG()" class="btn btn-primary btn-sm">+ Add TEG</button>
+              </div>
+            </div>
+            <div id="teg-list" class="card-body teg-list-body"></div>
+          </div>
+
+          <!-- Cartridge & QC Tally -->
+          <div class="card panel-tally">
+            <div class="card-header">
+              <h3>Cartridge &amp; QC Tally</h3>
+              <select id="tally-days" class="select-sm" onchange="refreshTally()">
+                <option value="30">30d</option>
+                <option value="90" selected>90d</option>
+                <option value="180">180d</option>
+                <option value="365">1yr</option>
+              </select>
+            </div>
+            <div id="tally-body" class="card-body tally-body"></div>
+          </div>
+
+          <!-- Communication Activity -->
+          <div class="card panel-comms">
+            <div class="card-header">
+              <h3>Communication Activity</h3>
+              <button onclick="showLogComm()" class="btn btn-sm btn-ghost">+ Log</button>
+            </div>
+            <div id="comm-activity-body" class="card-body"></div>
+          </div>
+
+        </div><!-- /.account-grid3 -->
+
+        <!-- Account Tabs ─────────────────────────────────────────── -->
         <div class="tabs">
           <button class="tab active" data-tab="tab-overview">Overview</button>
           <button class="tab" data-tab="tab-sales">Sales</button>
           <button class="tab" data-tab="tab-contacts">Contacts</button>
           <button class="tab" data-tab="tab-notes">Notes</button>
+          <button class="tab" data-tab="tab-files">Files</button>
+          <button class="tab" data-tab="tab-activity">Activity Log</button>
         </div>
 
-        <!-- Overview Tab -->
+        <!-- Overview Tab ────────────────────────────────────────── -->
         <div id="tab-overview" class="tab-panel active">
-          <div id="acct-kpi-row" class="kpi-row"></div>
           <div class="card">
             <div class="card-header"><h3>Revenue Targets</h3></div>
             <div id="acct-targets" class="card-body"></div>
           </div>
           <div class="card">
-            <div class="card-header"><h3>Recent Orders</h3></div>
+            <div class="card-header">
+              <h3>Recent Orders</h3>
+              <span id="recent-orders-sub" class="subtitle"></span>
+            </div>
             <div id="acct-recent-orders" class="card-body"></div>
           </div>
         </div>
 
-        <!-- Sales Tab -->
+        <!-- Sales Tab ───────────────────────────────────────────── -->
         <div id="tab-sales" class="tab-panel">
           <div class="card">
             <div class="card-header">
-              <h3>Product Sales Summary</h3>
-              <select id="sales-days" onchange="reloadAccountDetail()">
+              <h3>Product Sales Detail</h3>
+              <select id="sales-days" class="select-sm" onchange="reloadAccountDetail()">
                 <option value="30">Last 30 days</option>
                 <option value="90" selected>Last 90 days</option>
                 <option value="180">Last 180 days</option>
@@ -117,7 +178,7 @@
           </div>
         </div>
 
-        <!-- Contacts Tab -->
+        <!-- Contacts Tab ────────────────────────────────────────── -->
         <div id="tab-contacts" class="tab-panel">
           <div class="card">
             <div class="card-header">
@@ -128,21 +189,47 @@
           </div>
         </div>
 
-        <!-- Notes Tab -->
+        <!-- Notes Tab ───────────────────────────────────────────── -->
         <div id="tab-notes" class="tab-panel">
           <div class="card">
             <div class="card-header">
               <h3>Notes</h3>
-              <button onclick="showAddNote()" class="btn btn-primary btn-sm">+ Add Note</button>
+              <div class="card-header-actions">
+                <span id="notes-sources" class="subtitle"></span>
+                <button onclick="showAddNote()" class="btn btn-primary btn-sm">+ Add Note</button>
+              </div>
             </div>
             <div id="acct-notes" class="card-body"></div>
           </div>
         </div>
-      </section>
-    </main>
-  </div>
 
-  <!-- ── Modal ─────────────────────────────────────────────────── -->
+        <!-- Files Tab ───────────────────────────────────────────── -->
+        <div id="tab-files" class="tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <h3>OneDrive Files</h3>
+              <button onclick="syncOneDrive()" class="btn btn-sm btn-ghost">&#8635; Sync Drive</button>
+            </div>
+            <div id="acct-files" class="card-body"></div>
+          </div>
+        </div>
+
+        <!-- Activity Log Tab ────────────────────────────────────── -->
+        <div id="tab-activity" class="tab-panel">
+          <div class="card">
+            <div class="card-header">
+              <h3>Communication Log</h3>
+              <button onclick="showLogComm()" class="btn btn-primary btn-sm">+ Log Interaction</button>
+            </div>
+            <div id="acct-activity" class="card-body"></div>
+          </div>
+        </div>
+
+      </section><!-- /#view-account -->
+    </main>
+  </div><!-- /#app-shell -->
+
+  <!-- ── Modal ──────────────────────────────────────────────────────── -->
   <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal(event)">
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
@@ -153,7 +240,7 @@
     </div>
   </div>
 
-  <!-- ── Toast ─────────────────────────────────────────────────── -->
+  <!-- ── Toast Container ───────────────────────────────────────────── -->
   <div id="toast-container" class="toast-container"></div>
 
   <script src="/static/app.js"></script>

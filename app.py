@@ -42,7 +42,6 @@ def index():
 
 @app.route("/api/dashboard")
 def api_dashboard():
-    """Single call to load everything for initial page render."""
     data = db.get_dashboard_data()
     return jsonify(data)
 
@@ -78,6 +77,7 @@ def api_accounts():
         s = summary.get(a["id"], {})
         a["revenue_30d"] = s.get("revenue_30d", 0)
         a["last_order"] = s.get("last_order")
+        a["teg_count"] = db.get_account_teg_count(a["id"])
     return jsonify(accounts)
 
 
@@ -89,18 +89,28 @@ def api_account_detail(account_id: int):
 
     days = int(request.args.get("days", 90))
     sales = db.get_account_sales_summary(account_id, days=days)
-    recent_orders = db.get_recent_orders(account_id, limit=10)
+    cartridge_summary = db.get_cartridge_summary(account_id, days=days)
+    recent_orders = db.get_recent_orders(account_id, limit=15)
     targets = db.get_latest_targets(account_id)
     contacts = db.get_contacts(account_id)
     notes = db.get_account_notes(account_id)
+    tegs = db.get_tegs(account_id)
+    comms = db.get_account_communications(account_id, limit=50)
+    comm_stats = db.get_comm_stats_per_contact(account_id)
+    files = db.get_onedrive_files(account_id)
 
     return jsonify({
         "account": acct,
         "sales_summary": sales,
+        "cartridge_summary": cartridge_summary,
         "recent_orders": recent_orders,
         "targets": targets,
         "contacts": contacts,
         "notes": notes,
+        "tegs": tegs,
+        "comms": comms,
+        "comm_stats": comm_stats,
+        "files": files,
     })
 
 
@@ -167,6 +177,7 @@ def api_add_contact(account_id: int):
         phone=body.get("phone"),
         email=body.get("email"),
         notes=body.get("notes"),
+        imessage_handle=body.get("imessage_handle"),
     )
     return jsonify({"id": contact_id}), 201
 
@@ -198,13 +209,97 @@ def api_add_note(account_id: int):
     return jsonify({"id": note_id}), 201
 
 
+# ── TEG Machine API ───────────────────────────────────────────────────────────
+
+@app.route("/api/accounts/<int:account_id>/tegs", methods=["GET"])
+def api_get_tegs(account_id: int):
+    return jsonify(db.get_tegs(account_id))
+
+
+@app.route("/api/accounts/<int:account_id>/tegs", methods=["POST"])
+def api_add_teg(account_id: int):
+    if not db.get_account(account_id):
+        abort(404)
+    body = request.get_json(force=True)
+    location = body.get("location", "").strip()
+    if not location:
+        abort(400, "location required")
+    teg_id = db.add_teg(
+        account_id=account_id,
+        location=location,
+        department=body.get("department"),
+        serial_number=body.get("serial_number"),
+        model=body.get("model"),
+        notes=body.get("notes"),
+    )
+    # Set initial cartridge types if provided
+    if body.get("cartridge_types"):
+        db.set_teg_cartridges(teg_id, body["cartridge_types"])
+    return jsonify({"id": teg_id}), 201
+
+
+@app.route("/api/tegs/<int:teg_id>", methods=["PATCH"])
+def api_update_teg(teg_id: int):
+    body = request.get_json(force=True)
+    cartridge_types = body.pop("cartridge_types", None)
+    db.update_teg(teg_id, **body)
+    if cartridge_types is not None:
+        db.set_teg_cartridges(teg_id, cartridge_types)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/tegs/<int:teg_id>", methods=["DELETE"])
+def api_delete_teg(teg_id: int):
+    db.delete_teg(teg_id)
+    return jsonify({"ok": True})
+
+
+# ── Communications API ────────────────────────────────────────────────────────
+
+@app.route("/api/accounts/<int:account_id>/comms", methods=["GET"])
+def api_get_comms(account_id: int):
+    comms = db.get_account_communications(account_id)
+    stats = db.get_comm_stats_per_contact(account_id)
+    return jsonify({"comms": comms, "stats": stats})
+
+
+@app.route("/api/accounts/<int:account_id>/comms", methods=["POST"])
+def api_log_comm(account_id: int):
+    if not db.get_account(account_id):
+        abort(404)
+    body = request.get_json(force=True)
+    comm_type = body.get("type", "").strip()
+    occurred_at = body.get("occurred_at") or datetime.now().isoformat()
+    if not comm_type:
+        abort(400, "type required")
+    comm_id = db.log_communication(
+        account_id=account_id,
+        comm_type=comm_type,
+        occurred_at=occurred_at,
+        contact_id=body.get("contact_id"),
+        notes=body.get("notes"),
+        duration_sec=body.get("duration_sec"),
+        message_preview=body.get("message_preview"),
+        is_from_me=body.get("is_from_me", 1),
+    )
+    return jsonify({"id": comm_id}), 201
+
+
+@app.route("/api/comms/<int:comm_id>", methods=["DELETE"])
+def api_delete_comm(comm_id: int):
+    conn = db.get_conn()
+    conn.execute("DELETE FROM communications WHERE id=?", (comm_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 # ── Sync API ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/sync/email", methods=["POST"])
 def api_sync_email():
-    """Trigger email ingestion in background thread."""
-    days_back = int(request.get_json(force=True, silent=True).get("days_back", 7)
-                    if request.data else 7)
+    body = request.get_json(force=True, silent=True) or {}
+    days_back = int(body.get("days_back", 7))
 
     def _run():
         from ingestion.email_fetcher import run_ingestion
@@ -216,7 +311,6 @@ def api_sync_email():
 
 @app.route("/api/sync/notes", methods=["POST"])
 def api_sync_notes():
-    """Trigger Apple Notes + OneNote sync in background thread."""
     def _run():
         from integrations.apple_notes import sync_apple_notes
         from integrations.onenote import sync_onenote_notes
@@ -224,29 +318,50 @@ def api_sync_notes():
         sync_onenote_notes()
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing notes..."})
+    return jsonify({"ok": True, "message": "Syncing notes from Apple Notes + OneNote..."})
 
 
 @app.route("/api/sync/salesforce", methods=["POST"])
 def api_sync_sf():
-    """Trigger Salesforce sync in background thread."""
     def _run():
         from integrations.salesforce import run_sf_sync
         run_sf_sync()
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing Salesforce..."})
+    return jsonify({"ok": True, "message": "Syncing Salesforce contacts + opportunities..."})
+
+
+@app.route("/api/sync/imessage", methods=["POST"])
+def api_sync_imessage():
+    def _run():
+        from integrations.imessage import sync_imessage
+        result = sync_imessage()
+        log.info("iMessage sync: %s", result)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing iMessage communication history..."})
+
+
+@app.route("/api/sync/onedrive", methods=["POST"])
+def api_sync_onedrive():
+    def _run():
+        from integrations.onedrive import sync_onedrive_files
+        result = sync_onedrive_files()
+        log.info("OneDrive sync: %s", result)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing OneDrive files..."})
 
 
 @app.route("/api/sync/status")
 def api_sync_status():
     conn = db.get_conn()
-    row = conn.execute("""
+    rows = conn.execute("""
         SELECT subject, parsed_at, rows_inserted, status
-        FROM email_log ORDER BY parsed_at DESC LIMIT 5
+        FROM email_log ORDER BY parsed_at DESC LIMIT 10
     """).fetchall()
     conn.close()
-    return jsonify([dict(r) for r in row])
+    return jsonify([dict(r) for r in rows])
 
 
 # ── Hospital Systems API ──────────────────────────────────────────────────────
@@ -264,6 +379,18 @@ def api_create_system():
         abort(400, "name required")
     system_id = db.upsert_system(name, aliases=body.get("aliases", []))
     return jsonify({"id": system_id, "name": name}), 201
+
+
+# ── Products API ──────────────────────────────────────────────────────────────
+
+@app.route("/api/products")
+def api_products():
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT * FROM products ORDER BY prod_line, description"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 # ── Teardown ──────────────────────────────────────────────────────────────────

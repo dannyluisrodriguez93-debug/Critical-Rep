@@ -35,6 +35,26 @@ def _run_notes_sync():
         log.exception("Scheduler: notes sync failed: %s", e)
 
 
+def _run_imessage_sync():
+    log.info("Scheduler: syncing iMessage...")
+    try:
+        from integrations.imessage import sync_imessage
+        result = sync_imessage(days_back=3)
+        log.info("Scheduler: iMessage sync done — %s", result)
+    except Exception as e:
+        log.exception("Scheduler: iMessage sync failed: %s", e)
+
+
+def _run_onedrive_sync():
+    log.info("Scheduler: syncing OneDrive files...")
+    try:
+        from integrations.onedrive import sync_onedrive_files
+        result = sync_onedrive_files()
+        log.info("Scheduler: OneDrive sync done — %s", result)
+    except Exception as e:
+        log.exception("Scheduler: OneDrive sync failed: %s", e)
+
+
 def _run_sf_sync():
     log.info("Scheduler: syncing Salesforce...")
     try:
@@ -79,8 +99,26 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # iMessage sync: every 2 hours (macOS only — no-ops silently otherwise)
+    _scheduler.add_job(
+        _run_imessage_sync,
+        CronTrigger(hour="8,10,12,14,16,18,20", minute=30),
+        id="imessage_sync",
+        name="iMessage sync",
+        replace_existing=True,
+    )
+
+    # OneDrive file sync: once daily at 8:45 AM
+    _scheduler.add_job(
+        _run_onedrive_sync,
+        CronTrigger(hour=8, minute=45),
+        id="onedrive_sync",
+        name="OneDrive sync",
+        replace_existing=True,
+    )
+
     _scheduler.start()
-    log.info("Scheduler started — email ingestion at 7:30 AM ET daily")
+    log.info("Scheduler started — email 7:30 AM, notes 4x/day, iMsg 7x/day, OneDrive 8:45 AM ET")
 
 
 def stop_scheduler():
