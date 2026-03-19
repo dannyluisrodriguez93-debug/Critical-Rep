@@ -1,5 +1,5 @@
 """
-Google Drive integration — replaces OneDrive.
+Google Drive integration — syncs account-related files from Google Drive.
 
 Searches the user's Google Drive for files related to each account.
 Uses the same OAuth token as Gmail (single Google login covers both).
@@ -104,7 +104,7 @@ def sync_google_drive_files() -> dict:
                         best_match_id = aid
 
                 if best_score >= FUZZY_THRESHOLD and best_match_id:
-                    db.upsert_onedrive_file(
+                    db.upsert_drive_file(
                         account_id=best_match_id,
                         file_id=file_id,
                         name=name,

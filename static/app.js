@@ -75,7 +75,8 @@ function fileIcon(name, mime) {
   if (["docx","doc"].includes(ext) || m.includes("word")) return "📝";
   if (["xlsx","xls","csv"].includes(ext) || m.includes("spreadsheet") || m.includes("excel")) return "📊";
   if (["pptx","ppt"].includes(ext) || m.includes("presentation")) return "📋";
-  if (["one"].includes(ext) || m.includes("onenote")) return "📓";
+  if (m.includes("google-apps.spreadsheet")) return "📊";
+  if (m.includes("google-apps")) return "📄";
   if (["msg","eml"].includes(ext)) return "📧";
   return "📁";
 }
@@ -663,8 +664,8 @@ function renderFiles(files) {
   const el = document.getElementById("acct-files");
   if (!files.length) {
     el.innerHTML = `<div class="empty-state">
-      <div>No OneDrive files linked</div>
-      <div style="font-size:0.75rem;margin-top:6px;color:var(--text-muted)">Click "Sync Drive" to find files matching this account</div>
+      <div>No Google Drive files linked yet</div>
+      <div style="font-size:0.75rem;margin-top:6px;color:var(--text-muted)">Click "Sync Drive" above to scan your Drive for files matching this account</div>
     </div>`; return;
   }
   el.innerHTML = `<div class="file-grid">` +
@@ -1103,8 +1104,6 @@ async function syncDrive() {
   try { const r = await post("/api/sync/drive",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
-// keep old name working
-async function syncOneDrive() { return syncDrive(); }
 async function synciMessage() {
   try { const r = await post("/api/sync/imessage",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
@@ -1162,7 +1161,7 @@ function renderGoogleCard(g) {
     ? `<div class="integration-connected-as">Signed in as <strong>${escHtml(g.email||"Google Account")}</strong></div>
        <div class="integration-covers">${coversHtml}</div>
        <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
-         Gmail, Google Drive, and Google Sheets are all available with this connection.
+         Gmail syncs your report emails. Google Drive links files to your accounts.
        </p>
        <div class="integration-actions">
          <button class="btn btn-danger btn-sm" onclick="googleDisconnect()">Disconnect</button>
@@ -1174,7 +1173,7 @@ function renderGoogleCard(g) {
          <ol>
            <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a></li>
            <li>Create a new project (any name, e.g. "AccountHub")</li>
-           <li>Click <strong>APIs & Services → Enable APIs</strong> — enable Gmail API, Drive API, and Sheets API</li>
+           <li>Click <strong>APIs & Services → Enable APIs</strong> — enable <strong>Gmail API</strong> and <strong>Google Drive API</strong></li>
            <li>Click <strong>APIs & Services → OAuth consent screen</strong> → External → fill in your app name</li>
            <li>Click <strong>Credentials → Create Credentials → OAuth 2.0 Client ID</strong> → Web application</li>
            <li>Under <em>Authorized redirect URIs</em>, add: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
@@ -1200,7 +1199,7 @@ function renderGoogleCard(g) {
       <span class="integration-icon">🔵</span>
       <div class="integration-info">
         <div class="integration-name">Google Account</div>
-        <div class="integration-desc">Gmail + Google Drive + Google Sheets</div>
+        <div class="integration-desc">Gmail (report emails) + Google Drive (files)</div>
       </div>
       ${statusHtml}
     </div>
@@ -1455,11 +1454,11 @@ function renderWizardStep() {
     },
     google: {
       title: "Connect Your Google Account",
-      sub:   "One Google login covers Gmail (for report emails), Google Drive (for files), and Google Sheets.",
+      sub:   "One Google login covers Gmail (for report emails) and Google Drive (for files).",
       html:  `<div class="integration-steps">
                 <ol>
                   <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a> (free)</li>
-                  <li>Create a project → Enable Gmail API, Drive API, and Sheets API</li>
+                  <li>Create a project → Enable <strong>Gmail API</strong> and <strong>Google Drive API</strong></li>
                   <li>Create OAuth 2.0 credentials → Web application</li>
                   <li>Add this redirect URI: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
                   <li>Paste your Client ID and Secret below</li>

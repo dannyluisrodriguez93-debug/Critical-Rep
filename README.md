@@ -4,136 +4,120 @@ A personal sales account management tool for tracking hospital accounts, TEG mac
 
 ---
 
-## Quick Start (Non-Technical — Click-by-Click)
+## Quick Start — Click-by-Click for Non-Technical Users
 
-### Step 1 — Download Python
+### Step 1 — Install Python (one time only)
 
-1. Open your web browser and go to **https://www.python.org/downloads/**
+1. Open Safari or Chrome and go to **https://www.python.org/downloads/**
 2. Click the big yellow **"Download Python 3.x.x"** button
-3. Open the downloaded file and follow the installer — click **Continue**, **Continue**, **Install**
-4. When asked, check **"Add Python to PATH"** if the option appears
+3. Open the downloaded file → click **Continue**, **Continue**, **Install**
+4. Close the installer when it says "The installation was successful"
 
 ---
 
-### Step 2 — Download the App
+### Step 2 — Get the App Files
 
-If you received this as a ZIP file:
+If you received a ZIP file:
 1. Double-click the ZIP to unzip it
-2. Move the folder somewhere easy to find, like your **Desktop** or **Documents**
-
-If you cloned it from GitHub, you already have the folder.
+2. Move the resulting folder somewhere easy to find — your **Desktop** works fine
 
 ---
 
-### Step 3 — Install the App (one time only)
+### Step 3 — Start the App (first time)
 
-1. Find the file called **`start.command`** inside the app folder
-2. **Right-click** it → click **Open** → click **Open** again when macOS asks if you're sure
-3. A terminal window opens and installs everything automatically
-4. When it says `Account Hub — Starting`, you're ready!
+1. Open the app folder
+2. Find the file called **`start.command`**
+3. **Right-click it → Open → Open** (macOS will ask the first time because it's a downloaded file — clicking Open is safe)
+4. A terminal window opens and installs everything automatically
+5. When you see `App is starting…` your browser should open to the app
 
-> **Note:** The first time you open `start.command`, macOS may warn you it's "from an unidentified developer." Right-click → Open to bypass this — it's safe.
-
----
-
-### Step 4 — Open the App
-
-After `start.command` finishes, your browser should open automatically to:
-
-**http://localhost:5000**
-
-If it doesn't open automatically, copy that address and paste it into Chrome, Safari, or Firefox.
+> After the first time, you can just double-click `start.command` to launch — no right-click needed.
 
 ---
 
-### Step 5 — Complete the Setup Wizard
+### Step 4 — Open the App in Your Browser
 
-When the app opens for the first time, a **Setup Wizard** will appear automatically.
+The app opens at: **http://localhost:5000**
 
-Follow the on-screen steps:
-1. **Welcome** — overview of what we'll connect
-2. **Google Account** — follow the in-app instructions to connect Gmail + Drive
-3. **Salesforce** — optional; skip if you don't use it
-4. **Email Filter** — enter the email addresses your report emails come from
-5. **Done!**
+If your browser doesn't open automatically, copy that address and paste it into Chrome, Safari, or Firefox.
+
+---
+
+### Step 5 — Follow the Setup Wizard
+
+When the app opens for the first time, a **Setup Wizard** appears automatically. Follow the steps:
+
+1. **Welcome** — overview of the setup
+2. **Connect Google** — follow the in-app instructions to connect Gmail and Drive
+3. **Salesforce** — optional; skip if you don't have access
+4. **Email Filter** — enter the sender address(es) your report emails come from
+5. **Done** — start using the app
+
+You can revisit any of these settings any time by clicking **⚙ Integrations** in the top-right corner.
 
 ---
 
 ## Starting the App After Setup
 
-From now on, just double-click **`start.command`** and the app starts.
+Double-click **`start.command`** → the app starts and your browser opens.
 
-Your browser opens to **http://localhost:5000** automatically.
-
-To stop the app, click the terminal window and press **Control + C**, or just close the window.
+To stop the app: press **Control+C** in the terminal window, or just close the terminal window.
 
 ---
 
-## Setting Up Google (Detailed Instructions)
+## Connecting Google (Step-by-Step)
 
-The app uses your Google account to:
-- **Read report emails** forwarded to Gmail from Outlook
-- **Index files** in Google Drive related to your accounts
-- **Read Google Sheets** for data you paste there
+The app uses Google for two things:
+- **Gmail** — reads your report emails (forwarded from Outlook) to parse sales data automatically
+- **Google Drive** — finds files in your Drive that relate to your accounts and shows them in the Files tab
 
-### Getting Google OAuth Credentials (one time only)
+### Getting Google Credentials (one time only)
 
-1. Go to **https://console.cloud.google.com/** — sign in with your Google account
-2. Click the project dropdown at the top → click **New Project**
-   - Name it anything, e.g. `AccountHub` → click **Create**
-3. Click **APIs & Services** → **Library**
-   - Search for and enable: **Gmail API**, **Google Drive API**, **Google Sheets API**
-4. Click **APIs & Services** → **OAuth consent screen**
-   - Choose **External** → click Create
-   - Fill in App name (e.g. `AccountHub`) and your email → click Save and Continue
-   - Skip through the remaining screens by clicking Save and Continue
-5. Click **APIs & Services** → **Credentials** → **+ Create Credentials** → **OAuth client ID**
+1. Open **https://console.cloud.google.com/** — sign in with your Google account
+2. Click the project dropdown → **New Project** → name it anything (e.g. `AccountHub`) → **Create**
+3. In the left menu, click **APIs & Services → Library**
+   - Search **Gmail API** → click it → **Enable**
+   - Search **Google Drive API** → click it → **Enable**
+4. Click **APIs & Services → OAuth consent screen**
+   - Choose **External** → click **Create**
+   - Fill in **App name** (e.g. `AccountHub`) and your email address → **Save and Continue**
+   - Click **Save and Continue** on the next two screens too → **Back to Dashboard**
+5. Click **APIs & Services → Credentials** → **+ Create Credentials** → **OAuth client ID**
    - Application type: **Web application**
-   - Name: anything you like
-   - Under **Authorized redirect URIs**, click **+ Add URI** and enter:
+   - Name: anything you like (e.g. `AccountHub`)
+   - Under **Authorized redirect URIs**, click **+ Add URI** and type exactly:
      `http://localhost:5000/integrations/google/callback`
    - Click **Create**
-6. A popup shows your **Client ID** and **Client Secret** — copy both
-7. In Account Hub, go to **Integrations** → paste them in the Google section → click **Save & Connect Google**
-8. You'll be taken to Google's sign-in page — log in and click **Allow**
-9. You'll be returned to Account Hub and see "Connected as you@gmail.com" ✓
+6. A popup shows your **Client ID** and **Client Secret** — keep this window open
+7. In Account Hub, click **⚙ Integrations** (top right)
+8. Paste the Client ID and Client Secret into the Google section → **Save & Connect Google**
+9. You'll be taken to Google's sign-in page — log in with the Gmail address you want to use → **Allow**
+10. You'll be returned to Account Hub and see "Connected as you@gmail.com" ✅
 
 ---
 
-## Setting Up Email Forwarding from Outlook
+## Forwarding Outlook Emails to Gmail
 
-So that your Haemonetics/Tableau report emails arrive in Gmail:
+Your Haemonetics/Tableau report emails arrive in Outlook. To get them into Gmail for the app to read:
 
 1. Open Outlook in your browser (outlook.office.com)
-2. Click the gear icon (⚙️) → **View all Outlook settings**
-3. Go to **Mail** → **Forwarding**
+2. Click the gear icon ⚙️ → **View all Outlook settings**
+3. Go to **Mail → Forwarding**
 4. Check **Enable forwarding**
-5. Enter your Gmail address
-6. Click **Save**
+5. Enter your Gmail address → **Save**
 
-Now all emails (including report emails) will be forwarded to Gmail, where Account Hub can read them.
-
----
-
-## Using Google Drive Instead of OneDrive
-
-Since you don't have Azure/OneDrive access, here's how to use Google Drive:
-
-1. Create a folder in **Google Drive** called `Account Files`
-2. Inside it, create a subfolder for each hospital account
-3. Copy/paste any relevant files (PDFs, spreadsheets, notes) into those subfolders
-4. In Account Hub, click **Drive** (top right) to sync — the app will find and link files to accounts
+From now on, all emails (including report emails) will be forwarded to Gmail automatically.
 
 ---
 
-## Using Google Sheets for Notes
+## Using Google Drive for Files
 
-Google Sheets can serve as a replacement for OneNote:
+1. Go to **drive.google.com** and create a folder called `Account Files`
+2. Inside it, create a subfolder for each hospital account (name each subfolder with the account name)
+3. Copy any relevant files (PDFs, spreadsheets, etc.) into those subfolders
+4. In Account Hub, click **Drive** (top right) to sync — files will appear in each account's **Files** tab
 
-1. Go to **drive.google.com** and create a new Google Sheet
-2. Use columns like: Account Name, Date, Note
-3. The app will discover the sheet in Drive sync
-4. You can also type notes directly in Account Hub under any account → Notes tab
+> **Note:** Google Sheets files you save in Drive will also appear in the Files tab. The app doesn't read their content — it just links them so you can click to open them directly.
 
 ---
 
@@ -141,70 +125,91 @@ Google Sheets can serve as a replacement for OneNote:
 
 1. Click the **+** button at the top of the left sidebar
 2. Enter the hospital/account name
-3. Optionally add the hospital system name, address, and territory
+3. Optionally add the hospital system, address, and territory
 4. Click **Create Account**
 
-Repeat for each account. You can also add contacts, TEG machines, and notes from each account's page.
+Repeat for each account. Add contacts, TEG machines, and notes from each account's page.
 
 ---
 
 ## Syncing Data
 
-Use the buttons in the top-right corner to sync:
+Use the buttons in the top-right corner:
 
 | Button | What it does |
 |--------|-------------|
-| **Email** | Fetches and parses report emails from Gmail |
+| **Email** | Reads report emails from Gmail and parses sales data |
 | **Notes** | Syncs Apple Notes (Mac only) |
-| **Drive** | Syncs Google Drive files |
+| **Drive** | Finds and links files from Google Drive |
 | **iMsg**  | Syncs iMessage history (Mac only) |
-| **SF**    | Syncs Salesforce data |
+| **SF**    | Syncs Salesforce contacts and opportunities |
 
-The app also syncs automatically in the background once a day.
+The app also syncs automatically in the background every day.
 
 ---
 
-## Checking Integration Status
+## Checking Connections
 
-Click the **⚙ Integrations** button (top right) to see:
-- Which services are connected (green = connected)
-- What needs attention
+Click **⚙ Integrations** (top right) to see:
+- Which services are connected (**green** = connected, **gray** = not connected)
 - Connect/disconnect buttons for each service
-- Settings for each integration
+- Where to enter credentials
+- What each integration does
 
 ---
 
 ## Troubleshooting
 
-**The app won't start:**
-- Make sure Python is installed (Step 1)
-- Try right-clicking `start.command` → Open (not just double-clicking)
+**The app won't start**
+→ Make sure Python is installed (Step 1 above)
+→ Right-click `start.command` → Open (not just double-click, first time only)
 
-**Email sync returns nothing:**
-- Make sure your Google account is connected (Integrations page)
-- Make sure email forwarding from Outlook is set up
-- Check that the report sender addresses match what's in the Email section of Integrations
+**Email sync returns no data**
+→ Check the Integrations page — Google must be connected (green)
+→ Check that Outlook forwarding is set up (see above)
+→ Confirm the sender address in the Email Parser section of Integrations matches your report email sender
 
-**"Google not connected" error:**
-- Go to Integrations and click **Save & Connect Google** again
+**"Google not connected" message**
+→ Go to Integrations and click **Save & Connect Google** to go through the connection process again
 
-**The app loses its data:**
-- Data is stored in `account_hub.db` in the app folder. Don't delete this file.
+**App data is lost / database is empty**
+→ The data lives in `account_hub.db` in the app folder — do not delete this file
 
 ---
 
-## For ChatGPT / Codex (Developer Notes)
+## For Developers / ChatGPT Codex
 
-This is a Python/Flask web app with a SQLite database and vanilla JS frontend.
+**Stack:** Python 3 / Flask / SQLite / vanilla JS (no build step)
 
-- Entry point: `app.py` — run with `python app.py`
-- Database: SQLite at `account_hub.db` — schema in `database.py`
-- All integration credentials are stored in the `settings` table (not env vars)
-- Google OAuth: `integrations/google_auth.py` — standard web OAuth flow
-- Email fetching: `integrations/gmail.py` — uses Gmail API via Google OAuth
-- Drive sync: `integrations/google_drive.py` — uses Drive API v3
-- Microsoft/Azure has been removed; Google replaces it throughout
-- Frontend: single-page app in `static/app.js` + `static/style.css` + `templates/dashboard.html`
-- No build step needed; all pure HTML/CSS/JS
-- The integrations page is at route `/#integrations` and uses `GET /api/integrations/status`
-- First-run wizard is triggered when `setup_complete` setting is missing from DB
+**Key files:**
+- `app.py` — Flask routes; entry point (`python app.py`)
+- `database.py` — SQLite schema and all query helpers
+- `config.py` — configuration (loads from `.env` and DB settings)
+- `ingestion/email_fetcher.py` — fetches emails via Gmail API, parses HTML tables
+- `ingestion/scheduler.py` — APScheduler background jobs
+- `integrations/google_auth.py` — Google OAuth 2.0 web flow
+- `integrations/gmail.py` — Gmail API email fetching
+- `integrations/google_drive.py` — Google Drive API file sync
+- `integrations/salesforce.py` — Salesforce API (optional)
+- `integrations/apple_notes.py` — AppleScript-based Notes sync (Mac only)
+- `integrations/imessage.py` — SQLite-based iMessage sync (Mac only)
+- `static/app.js` — Single-page app logic
+- `static/style.css` — Dark theme stylesheet
+- `templates/dashboard.html` — Main HTML shell
+
+**Architecture notes:**
+- All integration credentials are stored in the `settings` DB table, not `.env` files
+- The Integrations page (`/api/integrations/status`) drives UI connect/disconnect flows
+- First-run wizard is triggered when `setup_complete` is absent from the settings table
+- Google OAuth callback: `/integrations/google/callback`
+- Drive files are stored in the `drive_files` table (renamed from legacy `onedrive_files`)
+- Microsoft/Azure/OneDrive/OneNote have been fully removed — Google replaces all of it
+- iMessage and Apple Notes gracefully no-op on non-Mac systems
+- All syncs degrade gracefully (return `{ok: False, reason: "…"}`) when not connected
+
+**To set up for development:**
+```bash
+pip install -r requirements.txt
+python app.py
+# Open http://localhost:5000
+```

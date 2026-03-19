@@ -110,7 +110,7 @@ def api_integrations_status():
             "connected":  google_connected,
             "configured": is_configured(),
             "email":      google_email,
-            "covers":     ["Gmail", "Google Drive", "Google Sheets"],
+            "covers":     ["Gmail", "Google Drive"],
         },
         "salesforce": {
             "configured": sf_configured,
@@ -272,7 +272,7 @@ def api_account_detail(account_id: int):
     tegs = db.get_tegs(account_id)
     comms = db.get_account_communications(account_id, limit=50)
     comm_stats = db.get_comm_stats_per_contact(account_id)
-    files = db.get_onedrive_files(account_id)
+    files = db.get_drive_files(account_id)
 
     return jsonify({
         "account": acct,
@@ -543,12 +543,6 @@ def api_sync_drive():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing Google Drive files..."})
-
-
-# Keep old route working for any cached references
-@app.route("/api/sync/onedrive", methods=["POST"])
-def api_sync_onedrive():
-    return api_sync_drive()
 
 
 @app.route("/api/sync/status")

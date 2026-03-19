@@ -1,9 +1,11 @@
 """
 Background scheduler — runs automatically when app.py starts.
-Checks for new emails every morning at 7:30 AM and syncs notes.
+Checks for new emails every morning at 7:30 AM and syncs notes / Drive files.
+All syncs no-op gracefully if the relevant integration is not connected.
 """
 
 import logging
+import platform
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -11,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 log = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+_IS_MAC = platform.system() == "Darwin"
 
 
 def _run_email_ingestion():
@@ -24,18 +27,20 @@ def _run_email_ingestion():
 
 
 def _run_notes_sync():
-    log.info("Scheduler: syncing notes...")
+    if not _IS_MAC:
+        return
+    log.info("Scheduler: syncing Apple Notes...")
     try:
         from integrations.apple_notes import sync_apple_notes
-        from integrations.onenote import sync_onenote_notes
-        apple_count = sync_apple_notes()
-        one_count = sync_onenote_notes()
-        log.info("Scheduler: notes sync done — Apple: %d, OneNote: %d", apple_count, one_count)
+        count = sync_apple_notes()
+        log.info("Scheduler: notes sync done — Apple: %d", count)
     except Exception as e:
         log.exception("Scheduler: notes sync failed: %s", e)
 
 
 def _run_imessage_sync():
+    if not _IS_MAC:
+        return
     log.info("Scheduler: syncing iMessage...")
     try:
         from integrations.imessage import sync_imessage
@@ -45,14 +50,14 @@ def _run_imessage_sync():
         log.exception("Scheduler: iMessage sync failed: %s", e)
 
 
-def _run_onedrive_sync():
-    log.info("Scheduler: syncing OneDrive files...")
+def _run_drive_sync():
+    log.info("Scheduler: syncing Google Drive files...")
     try:
-        from integrations.onedrive import sync_onedrive_files
-        result = sync_onedrive_files()
-        log.info("Scheduler: OneDrive sync done — %s", result)
+        from integrations.google_drive import sync_google_drive_files
+        result = sync_google_drive_files()
+        log.info("Scheduler: Drive sync done — %s", result)
     except Exception as e:
-        log.exception("Scheduler: OneDrive sync failed: %s", e)
+        log.exception("Scheduler: Drive sync failed: %s", e)
 
 
 def _run_sf_sync():
@@ -72,7 +77,7 @@ def start_scheduler():
 
     _scheduler = BackgroundScheduler(timezone="America/New_York")
 
-    # Email ingestion: 7:30 AM daily (reports arrive overnight)
+    # Email ingestion: 7:30 AM daily
     _scheduler.add_job(
         _run_email_ingestion,
         CronTrigger(hour=7, minute=30),
@@ -81,12 +86,12 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # Notes sync: 8:00 AM daily + every 4 hours
+    # Apple Notes sync: 4x daily (Mac only — no-ops silently otherwise)
     _scheduler.add_job(
         _run_notes_sync,
         CronTrigger(hour="8,12,16,20", minute=0),
         id="notes_sync",
-        name="Notes sync",
+        name="Apple Notes sync",
         replace_existing=True,
     )
 
@@ -99,7 +104,7 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # iMessage sync: every 2 hours (macOS only — no-ops silently otherwise)
+    # iMessage sync: every 2 hours (Mac only — no-ops silently otherwise)
     _scheduler.add_job(
         _run_imessage_sync,
         CronTrigger(hour="8,10,12,14,16,18,20", minute=30),
@@ -108,17 +113,20 @@ def start_scheduler():
         replace_existing=True,
     )
 
-    # OneDrive file sync: once daily at 8:45 AM
+    # Google Drive file sync: once daily at 8:45 AM
     _scheduler.add_job(
-        _run_onedrive_sync,
+        _run_drive_sync,
         CronTrigger(hour=8, minute=45),
-        id="onedrive_sync",
-        name="OneDrive sync",
+        id="drive_sync",
+        name="Google Drive sync",
         replace_existing=True,
     )
 
     _scheduler.start()
-    log.info("Scheduler started — email 7:30 AM, notes 4x/day, iMsg 7x/day, OneDrive 8:45 AM ET")
+    log.info(
+        "Scheduler started — email 7:30 AM, notes 4x/day, iMsg 7x/day, Drive 8:45 AM ET"
+        + (" (Mac features active)" if _IS_MAC else " (non-Mac: iMsg/Notes disabled)")
+    )
 
 
 def stop_scheduler():
@@ -134,8 +142,9 @@ def trigger_now(job_id: str) -> bool:
     if not _scheduler:
         return False
     try:
-        _scheduler.get_job(job_id).trigger
-        _scheduler.get_job(job_id).modify(next_run_time=__import__("datetime").datetime.now())
+        _scheduler.get_job(job_id).modify(
+            next_run_time=__import__("datetime").datetime.now()
+        )
         return True
     except Exception:
         return False

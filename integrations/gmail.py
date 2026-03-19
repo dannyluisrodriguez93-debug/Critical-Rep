@@ -1,5 +1,5 @@
 """
-Gmail integration — replaces Microsoft Graph email fetching.
+Gmail integration — fetches report emails via Google OAuth.
 
 Fetches report emails forwarded to your Gmail account from Haemonetics/Tableau.
 Uses the same Google OAuth token as Google Drive (single login).

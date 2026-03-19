@@ -1,7 +1,7 @@
 """
 Google OAuth 2.0 integration.
 
-One login covers Gmail + Google Drive + Google Sheets.
+One login covers Gmail + Google Drive.
 Credentials (Client ID + Secret) are stored in the DB settings table
 and set by the user through the Integrations page in the UI.
 

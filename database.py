@@ -162,8 +162,8 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_comms_account ON communications(account_id, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_comms_contact ON communications(contact_id, occurred_at DESC);
 
-    -- ── Drive File References (Google Drive or OneDrive) ───────────────
-    CREATE TABLE IF NOT EXISTS onedrive_files (
+    -- ── Drive File References (Google Drive) ─────────────────────────
+    CREATE TABLE IF NOT EXISTS drive_files (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
         file_id     TEXT NOT NULL,
@@ -203,6 +203,13 @@ def _migrate(conn):
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # Migrate legacy onedrive_files table → drive_files (one-time rename)
+    try:
+        conn.execute("ALTER TABLE onedrive_files RENAME TO drive_files")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # table already renamed or doesn't exist
 
 
 # ── Settings (key/value store for integration credentials) ────────────────────
@@ -794,14 +801,14 @@ def imessage_already_synced(thread_id: str, occurred_at: str) -> bool:
     return row is not None
 
 
-# ── OneDrive Files ────────────────────────────────────────────────────────────
+# ── Drive Files (Google Drive) ────────────────────────────────────────────────
 
-def upsert_onedrive_file(account_id: int, file_id: str, name: str,
-                         web_url: str = None, size: int = None,
-                         modified_at: str = None, mime_type: str = None):
+def upsert_drive_file(account_id: int, file_id: str, name: str,
+                      web_url: str = None, size: int = None,
+                      modified_at: str = None, mime_type: str = None):
     conn = get_conn()
     conn.execute("""
-        INSERT INTO onedrive_files (account_id, file_id, name, web_url, size, modified_at, mime_type)
+        INSERT INTO drive_files (account_id, file_id, name, web_url, size, modified_at, mime_type)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_id, file_id) DO UPDATE SET
             name=excluded.name, web_url=excluded.web_url,
@@ -811,10 +818,10 @@ def upsert_onedrive_file(account_id: int, file_id: str, name: str,
     conn.close()
 
 
-def get_onedrive_files(account_id: int) -> list[dict]:
+def get_drive_files(account_id: int) -> list[dict]:
     conn = get_conn()
     rows = conn.execute("""
-        SELECT * FROM onedrive_files WHERE account_id=?
+        SELECT * FROM drive_files WHERE account_id=?
         ORDER BY modified_at DESC
     """, (account_id,)).fetchall()
     conn.close()
