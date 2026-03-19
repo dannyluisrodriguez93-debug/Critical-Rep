@@ -79,9 +79,10 @@ def get_auth_url() -> Optional[str]:
         return None
 
 
-def handle_callback(code: str, state: str = None) -> tuple[bool, str]:
+def handle_callback(authorization_response: str, state: str = None) -> tuple[bool, str]:
     """
-    Exchange the authorization code for tokens and save them.
+    Exchange the OAuth callback URL for tokens and save them.
+    Accepts the full authorization_response URL (more robust than passing code alone).
     Returns (success, message).
     """
     client_id, client_secret = _get_credentials()
@@ -91,7 +92,7 @@ def handle_callback(code: str, state: str = None) -> tuple[bool, str]:
     try:
         from google_auth_oauthlib.flow import Flow
         flow = _build_flow(client_id, client_secret)
-        flow.fetch_token(code=code)
+        flow.fetch_token(authorization_response=authorization_response)
         creds = flow.credentials
 
         # Save token

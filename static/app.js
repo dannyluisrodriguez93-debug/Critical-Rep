@@ -1404,7 +1404,7 @@ const WIZARD_STEPS = ["welcome", "google", "salesforce", "email", "done"];
 let _wizardStep = 0;
 
 function showSetupWizard() {
-  _wizardStep = 0;
+  // _wizardStep is set by the caller before invoking this function
   document.getElementById("setup-wizard-overlay").classList.remove("hidden");
   renderWizardStep();
 }
@@ -1584,11 +1584,8 @@ function checkOAuthCallback() {
     toast("Google account connected successfully!", "success");
     history.replaceState(null, "", "/");
     showIntegrations();
-    // Advance wizard if it's open
-    if (!document.getElementById("setup-wizard-overlay").classList.contains("hidden")) {
-      _wizardStep = Math.max(_wizardStep, WIZARD_STEPS.indexOf("salesforce"));
-      renderWizardStep();
-    }
+    // Pre-advance wizard step so checkFirstRun() opens at the right step
+    _wizardStep = Math.max(_wizardStep, WIZARD_STEPS.indexOf("salesforce"));
     return;
   }
   if (hash.includes("google_error=")) {
@@ -1609,6 +1606,14 @@ async function checkFirstRun() {
     _intStatus = status;
     updateIntegrationsNavButton(status);
     if (!status.setup_complete) {
+      // Start wizard at the correct step based on what's already connected
+      if (status.salesforce?.configured) {
+        _wizardStep = WIZARD_STEPS.indexOf("email");
+      } else if (status.google?.connected) {
+        _wizardStep = WIZARD_STEPS.indexOf("salesforce");
+      } else {
+        _wizardStep = 0;
+      }
       showSetupWizard();
     }
   } catch(e) { /* ignore */ }

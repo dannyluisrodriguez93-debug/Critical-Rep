@@ -6,8 +6,12 @@ Then open: http://localhost:5000
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime
+
+# Allow Google OAuth over plain http://localhost (safe for local dev)
+os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
 
 from flask import Flask, jsonify, redirect, render_template, request, abort, url_for
 
@@ -140,7 +144,7 @@ def google_oauth_start():
     from integrations.google_auth import get_auth_url
     url = get_auth_url()
     if not url:
-        return redirect("/#integrations?error=google_not_configured")
+        return redirect("/#integrations?google_error=not_configured")
     return redirect(url)
 
 
@@ -158,7 +162,7 @@ def google_oauth_callback():
         return redirect("/#integrations?google_error=no_code")
 
     from integrations.google_auth import handle_callback
-    success, message = handle_callback(code=code, state=state)
+    success, message = handle_callback(authorization_response=request.url, state=state)
 
     if success:
         return redirect("/#integrations?google_connected=1")
