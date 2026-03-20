@@ -5,10 +5,20 @@ stores results in SQLite.
 Email source: Gmail (via Google OAuth — connect through the Integrations page).
 Your Outlook emails should be forwarded to your Gmail address.
 
-Handles three email types:
+Handles four email types:
   1. "Yesterday's Sales Report" — per-shipment rows (account, product, units, revenue)
+     Sender: tableau-no-reply@haemonetics.com
   2. "BI Daily Report: Quarter Breakdown by Product" — quarterly rollup
+     Sender: tableau-no-reply@haemonetics.com
   3. "Pricing Hold Report" / Revenue Targets — overall MTD/QTD/YTD targets
+     Sender: tableau-no-reply@haemonetics.com
+  4. Oracle supply order notifications — order confirmations with item/quantity detail
+     Sender: oracle-no-reply@haemonetics.com (or configured via ORACLE_SENDER / DB setting)
+     Subject keywords: "order", "shipment", "supply order", "order confirmation"
+
+To add additional senders, update REPORT_SENDERS in config.py or set the
+"report_senders" key in DB settings (comma-separated).  The Oracle sender can
+also be set independently via ORACLE_SENDER in config.py / env.
 """
 
 import json
@@ -316,6 +326,136 @@ def parse_revenue_targets(html: str, report_date: str) -> int:
     return inserted
 
 
+# ── Oracle Supply Order parser ────────────────────────────────────────────────
+
+def parse_oracle_order(html: str, report_date: str) -> int:
+    """
+    Parse Oracle supply order notification emails.
+
+    Oracle order emails typically contain a table with columns like:
+        Item Number | Description | Quantity Ordered | Unit Price | Extended Amount
+    or similar variants.  Account name is usually in the subject or a header
+    line rather than per-row.
+
+    Because the exact Oracle template is not yet confirmed, this parser:
+      - Tries common column-name patterns for item, qty, and price
+      - Falls back to a text-only scan for "$" amounts if no table is found
+      - Stores matched rows as sales records (units + revenue) tied to the
+        account resolved from the email body
+
+    If the Oracle format differs, update the column aliases in `ci` below or
+    override the "oracle_sender" DB setting and reach out to adjust the parser.
+
+    Returns count of rows inserted.
+    """
+    headers, rows = _parse_html_table(html)
+
+    # Column aliases — extend these as the real Oracle format becomes known
+    if headers:
+        ci = {
+            "account":     _col_index(headers,
+                               "Account", "Customer", "Ship To", "Key Account Name"),
+            "item_num":    _col_index(headers,
+                               "Item Number", "Item No", "Item #", "Product Number",
+                               "Part Number"),
+            "item_desc":   _col_index(headers,
+                               "Description", "Item Description", "Product Description"),
+            "units":       _col_index(headers,
+                               "Quantity", "Qty", "Qty Ordered", "Quantity Ordered",
+                               "Units"),
+            "unit_price":  _col_index(headers,
+                               "Unit Price", "Price", "Unit Cost"),
+            "extended":    _col_index(headers,
+                               "Extended Amount", "Extended Price", "Total", "Revenue"),
+        }
+    else:
+        ci = {k: None for k in ("account", "item_num", "item_desc",
+                                 "units", "unit_price", "extended")}
+
+    _load_name_cache()
+    inserted = 0
+
+    # Attempt to find a top-level account name from the body text
+    # (Oracle emails often list "Ship-To: <account name>" outside the table)
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "lxml")
+    body_text = soup.get_text(" ", strip=True)
+
+    # Patterns like "Ship To: Hospital Name" or "Account: Hospital Name"
+    top_account_id = None
+    for pat in (
+        r"Ship[\s\-]?To[:\s]+([A-Za-z][\w\s,\.]+?)(?:\s{2,}|\n|$)",
+        r"Account[:\s]+([A-Za-z][\w\s,\.]+?)(?:\s{2,}|\n|$)",
+        r"Customer[:\s]+([A-Za-z][\w\s,\.]+?)(?:\s{2,}|\n|$)",
+    ):
+        m = re.search(pat, body_text, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            if len(candidate) > 4:
+                top_account_id = resolve_account_name(candidate)
+                if top_account_id:
+                    break
+
+    for row in rows:
+        def get(key):
+            idx = ci.get(key)
+            return row[idx].strip() if idx is not None and idx < len(row) else ""
+
+        # Per-row account overrides the top-level account (if column exists)
+        account_id = None
+        if ci.get("account") is not None:
+            raw = get("account")
+            if raw and raw.lower() not in ("", "total", "grand total"):
+                account_id = resolve_account_name(raw)
+        if not account_id:
+            account_id = top_account_id
+        if not account_id:
+            continue
+
+        item_number = get("item_num")
+        description = get("item_desc")
+        if not description and not item_number:
+            continue
+
+        product_id = db.upsert_product(
+            item_number=item_number or None,
+            description=description or f"Oracle item {item_number}",
+            prod_line="TEG",
+            prod_type="Supply Order",
+        )
+
+        units = _parse_int(get("units"))
+        # Prefer extended/total amount; fall back to unit_price * units
+        revenue_str = get("extended") or get("unit_price")
+        revenue = _parse_currency(revenue_str)
+        if not revenue and get("unit_price") and units:
+            revenue = _parse_currency(get("unit_price")) * units
+
+        ok = db.insert_sale(
+            account_id=account_id,
+            product_id=product_id,
+            prod_line="TEG",
+            units=units or 1,
+            revenue=revenue,
+            report_date=report_date,
+            tracking=None,
+            carrier=None,
+        )
+        if ok:
+            inserted += 1
+
+    log.info("Oracle order: inserted %d rows for %s", inserted, report_date)
+    return inserted
+
+
+def _is_oracle_sender(sender: str) -> bool:
+    """Check whether an email came from Oracle (configurable via DB or config)."""
+    oracle_sender = db.get_setting("oracle_sender") or config.ORACLE_SENDER
+    # Support comma-separated list in case the setting holds multiple addresses
+    oracle_senders = [s.strip().lower() for s in oracle_sender.split(",")]
+    return sender.strip().lower() in oracle_senders
+
+
 def _ensure_rep_account() -> int:
     acct = db.find_account_by_name("__REP_TOTALS__")
     if acct:
@@ -366,6 +506,12 @@ def run_ingestion(days_back: int = 7) -> dict:
                 rows = parse_bi_quarterly_report(body_html, report_date)
             elif "pricing hold" in subject_lower or "revenue target" in subject_lower:
                 rows = parse_revenue_targets(body_html, report_date)
+            elif _is_oracle_sender(sender) or any(
+                kw in subject_lower
+                for kw in ("order confirmation", "supply order", "order notification",
+                           "shipment notification", "po acknowledgment")
+            ):
+                rows = parse_oracle_order(body_html, report_date)
             else:
                 log.info("Unrecognized email type: %r — skipping", subject)
                 status = "unrecognized"
