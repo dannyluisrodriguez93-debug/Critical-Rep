@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Account Hub</title>
   <link rel="stylesheet" href="/static/style.css">
+  <!-- Leaflet.js for geographic map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV/XN/WLs=" crossorigin=""></script>
 </head>
 <body>
 
@@ -23,6 +28,8 @@
         <button onclick="syncEmail()"      class="btn btn-sm" title="Sync Gmail report emails">&#9993; Email</button>
         <button onclick="syncNotes()"      class="btn btn-sm" title="Sync Apple Notes (Mac only)">&#128221; Notes</button>
         <button onclick="syncDrive()"      class="btn btn-sm" title="Sync Google Drive files">&#128196; Drive</button>
+        <button onclick="syncSheets()"     class="btn btn-sm" title="Sync Google Sheets data">&#128202; Sheets</button>
+        <button onclick="syncContacts()"   class="btn btn-sm" title="Sync Google Contacts">&#128101; Contacts</button>
         <button onclick="synciMessage()"   class="btn btn-sm" title="Sync iMessage history (Mac only)">&#128172; iMsg</button>
         <button onclick="syncSalesforce()" class="btn btn-sm" title="Sync Salesforce">&#9729; SF</button>
       </div>
@@ -157,6 +164,25 @@
         </div>
 
         <div id="tab-overview" class="tab-panel active">
+
+          <!-- Latest Update Synopsis -->
+          <div class="card" id="synopsis-card">
+            <div class="card-header">
+              <h3>Latest Update</h3>
+              <span id="synopsis-meta" class="subtitle"></span>
+            </div>
+            <div id="synopsis-body" class="card-body"></div>
+          </div>
+
+          <!-- Geographic Map -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Territory Map</h3>
+              <span class="subtitle">All accounts — current highlighted</span>
+            </div>
+            <div id="acct-map" style="height:320px;border-radius:var(--radius);overflow:hidden;"></div>
+          </div>
+
           <div class="card">
             <div class="card-header"><h3>Revenue Targets</h3></div>
             <div id="acct-targets" class="card-body"></div>

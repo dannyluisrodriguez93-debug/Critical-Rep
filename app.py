@@ -124,7 +124,7 @@ def api_integrations_status():
             "configured": is_configured(),
             "client_id":  google_client_id or "",
             "email":      google_email,
-            "covers":     ["Gmail", "Google Drive"],
+            "covers":     ["Gmail", "Google Drive", "Google Sheets", "Google Contacts"],
         },
         "salesforce": {
             "configured": sf_configured,
@@ -579,6 +579,62 @@ def api_sync_drive():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing Google Drive files..."})
+
+
+@app.route("/api/sync/sheets", methods=["POST"])
+def api_sync_sheets():
+    def _run():
+        try:
+            from integrations.google_sheets import sync_google_sheets
+            result = sync_google_sheets()
+            log.info("Google Sheets sync: %s", result)
+        except Exception as e:
+            log.warning("Google Sheets sync failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing Google Sheets data..."})
+
+
+@app.route("/api/sync/contacts", methods=["POST"])
+def api_sync_contacts():
+    def _run():
+        try:
+            from integrations.google_contacts import sync_google_contacts
+            result = sync_google_contacts()
+            log.info("Google Contacts sync: %s", result)
+        except Exception as e:
+            log.warning("Google Contacts sync failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing Google Contacts..."})
+
+
+@app.route("/api/accounts/geocode", methods=["POST"])
+def api_geocode_accounts():
+    """Geocode all accounts that lack lat/lng. Runs synchronously (fast with known coords)."""
+    try:
+        from utils.geocode import geocode_all_accounts
+        n = geocode_all_accounts(use_nominatim=True)
+        return jsonify({"ok": True, "updated": n})
+    except Exception as e:
+        log.error("Geocode failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/accounts/map")
+def api_accounts_map():
+    """Return all accounts with lat/lng for the map."""
+    accounts = db.get_all_accounts_with_coords()
+    return jsonify(accounts)
+
+
+@app.route("/api/accounts/<int:account_id>/synopsis")
+def api_account_synopsis(account_id: int):
+    """Return the latest update synopsis for an account."""
+    if not db.get_account(account_id):
+        abort(404)
+    synopsis = db.get_account_synopsis(account_id)
+    return jsonify(synopsis or {})
 
 
 @app.route("/api/sync/status")

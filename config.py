@@ -21,6 +21,8 @@ GOOGLE_REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI", f"http://localhost:{int(
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]

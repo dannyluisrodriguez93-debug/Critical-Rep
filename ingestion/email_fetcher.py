@@ -509,7 +509,10 @@ def run_ingestion(days_back: int = 7) -> dict:
             elif _is_oracle_sender(sender) or any(
                 kw in subject_lower
                 for kw in ("order confirmation", "supply order", "order notification",
-                           "shipment notification", "po acknowledgment")
+                           "shipment notification", "po acknowledgment",
+                           "purchase order", "order acknowledgment", "order receipt",
+                           "your order", "order #", "order no.", "delivery notification",
+                           "fwd: order", "fw: order")
             ):
                 rows = parse_oracle_order(body_html, report_date)
             else:

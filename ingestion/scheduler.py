@@ -60,6 +60,26 @@ def _run_drive_sync():
         log.exception("Scheduler: Drive sync failed: %s", e)
 
 
+def _run_sheets_sync():
+    log.info("Scheduler: syncing Google Sheets...")
+    try:
+        from integrations.google_sheets import sync_google_sheets
+        result = sync_google_sheets()
+        log.info("Scheduler: Sheets sync done — %s", result)
+    except Exception as e:
+        log.exception("Scheduler: Sheets sync failed: %s", e)
+
+
+def _run_contacts_sync():
+    log.info("Scheduler: syncing Google Contacts...")
+    try:
+        from integrations.google_contacts import sync_google_contacts
+        result = sync_google_contacts()
+        log.info("Scheduler: Contacts sync done — %s", result)
+    except Exception as e:
+        log.exception("Scheduler: Contacts sync failed: %s", e)
+
+
 def _run_sf_sync():
     log.info("Scheduler: syncing Salesforce...")
     try:
@@ -122,9 +142,28 @@ def start_scheduler():
         replace_existing=True,
     )
 
+    # Google Sheets sync: once daily at 9:00 AM
+    _scheduler.add_job(
+        _run_sheets_sync,
+        CronTrigger(hour=9, minute=0),
+        id="sheets_sync",
+        name="Google Sheets sync",
+        replace_existing=True,
+    )
+
+    # Google Contacts sync: once daily at 9:15 AM
+    _scheduler.add_job(
+        _run_contacts_sync,
+        CronTrigger(hour=9, minute=15),
+        id="contacts_sync",
+        name="Google Contacts sync",
+        replace_existing=True,
+    )
+
     _scheduler.start()
     log.info(
-        "Scheduler started — email 7:30 AM, notes 4x/day, iMsg 7x/day, Drive 8:45 AM ET"
+        "Scheduler started — email 7:30 AM, notes 4x/day, iMsg 7x/day, "
+        "Drive 8:45 AM, Sheets 9:00 AM, Contacts 9:15 AM ET"
         + (" (Mac features active)" if _IS_MAC else " (non-Mac: iMsg/Notes disabled)")
     )
 

@@ -328,6 +328,9 @@ function renderAccountHomepage(data) {
   renderNotes(notes);
   renderFiles(files);
   renderActivityLog(comms, ctcts);
+  // Async: synopsis + map (don't block render)
+  renderSynopsis(a.id);
+  initAccountMap(a.id);
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────
@@ -1112,6 +1115,14 @@ async function syncSalesforce() {
   try { const r = await post("/api/sync/salesforce",{}); toast(r.message,"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
+async function syncSheets() {
+  try { const r = await post("/api/sync/sheets",{}); toast(r.message,"info"); }
+  catch(e) { toast("Sync failed: "+e.message,"error"); }
+}
+async function syncContacts() {
+  try { const r = await post("/api/sync/contacts",{}); toast(r.message,"info"); }
+  catch(e) { toast("Sync failed: "+e.message,"error"); }
+}
 
 /* ══════════════════════════════════════════════════════════════════════
    INTEGRATIONS PAGE
@@ -1161,12 +1172,15 @@ function renderGoogleCard(g) {
     ? `<div class="integration-connected-as">Signed in as <strong>${escHtml(g.email||"Google Account")}</strong></div>
        <div class="integration-covers">${coversHtml}</div>
        <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
-         Gmail syncs your report emails. Google Drive links files to your accounts.
+         Gmail syncs report emails. Drive links files. Sheets reads hospital spreadsheets.
+         Contacts imports hospital staff to account contact lists.
        </p>
        <div class="integration-actions">
          <button class="btn btn-danger btn-sm" onclick="googleDisconnect()">Disconnect</button>
-         <button class="btn btn-sm btn-ghost" onclick="syncEmail()">&#9993; Sync Email Now</button>
-         <button class="btn btn-sm btn-ghost" onclick="syncDrive()">&#128196; Sync Drive Now</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncEmail()">&#9993; Email</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncDrive()">&#128196; Drive</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncSheets()">&#128202; Sheets</button>
+         <button class="btn btn-sm btn-ghost" onclick="syncContacts()">&#128101; Contacts</button>
        </div>`
     : `<div class="integration-steps">
          <p style="margin-bottom:10px">To connect Google, you need a free Google Cloud project. Here's how:</p>
@@ -1620,6 +1634,116 @@ async function checkFirstRun() {
       showSetupWizard();
     }
   } catch(e) { /* ignore */ }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   SYNOPSIS — Latest Update per hospital
+   ══════════════════════════════════════════════════════════════════════ */
+
+async function renderSynopsis(accountId) {
+  const card = document.getElementById("synopsis-card");
+  const body = document.getElementById("synopsis-body");
+  const meta = document.getElementById("synopsis-meta");
+  if (!card || !body) return;
+  try {
+    const s = await api(`/api/accounts/${accountId}/synopsis`);
+    if (!s || !s.snippet) {
+      card.style.display = "none";
+      return;
+    }
+    card.style.display = "";
+    const sourceLabel = s.source === "apple_notes" ? "Apple Notes"
+                      : s.source === "google_sheets" ? "Google Sheets"
+                      : s.source === "manual" ? "Manual Note"
+                      : escHtml(s.source || "");
+    meta.innerHTML = `Source: <strong>${sourceLabel}</strong> &middot; ${fmtDate(s.event_date || s.updated_at)}`;
+    body.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px">${escHtml(s.title || "Latest Note")}</div>
+      <div style="font-size:0.85rem;color:var(--text-secondary);white-space:pre-wrap;line-height:1.6">${escHtml(s.snippet)}</div>
+    `;
+  } catch(e) {
+    card.style.display = "none";
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   LEAFLET MAP — Geographic territory map per hospital page
+   ══════════════════════════════════════════════════════════════════════ */
+
+let _leafletMap     = null;
+let _mapAccountsData = [];
+
+async function initAccountMap(currentAccountId) {
+  // Fetch all accounts with coordinates
+  try {
+    _mapAccountsData = await api("/api/accounts/map");
+  } catch(e) {
+    document.getElementById("acct-map").innerHTML =
+      `<div class="empty-state" style="padding:40px">Map unavailable</div>`;
+    return;
+  }
+
+  // Filter to accounts with valid coords
+  const positioned = _mapAccountsData.filter(a => a.lat && a.lng);
+  if (!positioned.length) {
+    document.getElementById("acct-map").innerHTML =
+      `<div class="empty-state" style="padding:40px">
+        No coordinates yet.
+        <button class="btn btn-sm btn-ghost" onclick="geocodeAccounts()" style="margin-top:8px">Geocode Accounts</button>
+      </div>`;
+    return;
+  }
+
+  // Destroy old map instance if it exists (tab switching)
+  if (_leafletMap) {
+    _leafletMap.remove();
+    _leafletMap = null;
+  }
+
+  const mapEl = document.getElementById("acct-map");
+  mapEl.innerHTML = ""; // clear any prior content
+
+  const current = positioned.find(a => a.id === currentAccountId);
+  const centerLat = current ? current.lat : 26.0;
+  const centerLng = current ? current.lng : -80.2;
+
+  _leafletMap = L.map("acct-map").setView([centerLat, centerLng], 9);
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "&copy; OpenStreetMap contributors",
+    maxZoom: 18,
+  }).addTo(_leafletMap);
+
+  for (const acct of positioned) {
+    const isCurrent = acct.id === currentAccountId;
+    const radius    = isCurrent ? 10 : 6;
+    const color     = isCurrent ? "#f59e0b" : "#3b82f6";
+    const weight    = isCurrent ? 3 : 1.5;
+
+    const marker = L.circleMarker([acct.lat, acct.lng], {
+      radius,
+      color: "#fff",
+      weight,
+      fillColor: color,
+      fillOpacity: isCurrent ? 1 : 0.75,
+    }).addTo(_leafletMap);
+
+    const tooltip = `${acct.name}${acct.city ? " · " + acct.city : ""}`;
+    marker.bindTooltip(tooltip, { permanent: false, direction: "top" });
+
+    if (!isCurrent) {
+      marker.on("click", () => selectAccount(acct.id));
+    }
+  }
+}
+
+async function geocodeAccounts() {
+  toast("Geocoding accounts…", "info");
+  try {
+    const r = await post("/api/accounts/geocode", {});
+    toast(`Geocoded ${r.updated} accounts`, "success");
+    if (STATE.currentAccountId) initAccountMap(STATE.currentAccountId);
+  } catch(e) { toast("Geocode failed: " + e.message, "error"); }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
