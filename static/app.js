@@ -378,6 +378,23 @@ function renderHero(a, tgts, ords, tegs, data) {
 }
 
 // ── TEG Inventory ─────────────────────────────────────────────────────
+
+/** Color class for model pill */
+function tegModelClass(model) {
+  if (!model) return "model-other";
+  const m = model.toLowerCase();
+  if (m.includes("5000"))       return "model-5000";
+  if (m.includes("6s"))         return "model-6s";
+  if (m.includes("functional")) return "model-func";
+  return "model-other";
+}
+
+/** Build a unique key for a group: dept + model + sorted cartridges */
+function tegGroupKey(t) {
+  const carts = (t.cartridge_types||[]).slice().sort().join("||");
+  return `${t.department||"—"}|${t.model||""}|${carts}`;
+}
+
 function renderTEGInventory(tegs) {
   const el = document.getElementById("teg-list");
   document.getElementById("teg-total-count").textContent = tegs.length;
@@ -390,26 +407,73 @@ function renderTEGInventory(tegs) {
     </div>`; return;
   }
 
-  el.innerHTML = tegs.map(t => `
-    <div class="teg-card">
-      <div class="teg-card-header">
-        <div>
-          <div class="teg-dept">${escHtml(t.department||"—")}</div>
-          <div class="teg-location">${escHtml(t.location)}</div>
-          <div class="teg-model">${escHtml(t.model||"TEG Analyzer")}</div>
-          ${t.serial_number ? `<div class="teg-serial">S/N: ${escHtml(t.serial_number)}</div>` : ""}
+  // Build groups — preserve insertion order (first seen = first group)
+  const groupMap = new Map();
+  for (const t of tegs) {
+    const key = tegGroupKey(t);
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        dept:      t.department || "—",
+        model:     t.model      || "TEG Analyzer",
+        cartridges: t.cartridge_types || [],
+        machines:  [],
+      });
+    }
+    groupMap.get(key).machines.push(t);
+  }
+
+  let html = "";
+  let gIdx  = 0;
+  for (const [, g] of groupMap) {
+    const groupId    = `teg-grp-${gIdx++}`;
+    const modelCls   = tegModelClass(g.model);
+    const count      = g.machines.length;
+    const cartHtml   = g.cartridges.length
+      ? g.cartridges.map(c => `<span class="cart-chip">${escHtml(c)}</span>`).join("")
+      : `<span style="font-size:0.72rem;color:var(--text-muted)">No cartridges</span>`;
+
+    // Individual machine rows (hidden by default)
+    const machineRows = g.machines.map(m => `
+      <div class="teg-machine-row">
+        <div class="teg-machine-info">
+          <span class="teg-machine-loc">${escHtml(m.location)}</span>
+          ${m.serial_number ? `<span class="teg-machine-serial">S/N ${escHtml(m.serial_number)}</span>` : ""}
+          ${m.notes ? `<span class="teg-machine-notes">${escHtml(m.notes)}</span>` : ""}
         </div>
         <div class="teg-actions">
-          <button class="icon-btn" title="Edit" onclick="showEditTEG(${t.id})">✏️</button>
-          <button class="icon-btn" title="Remove" onclick="deleteTEG(${t.id})">🗑️</button>
+          <button class="icon-btn" title="Edit" onclick="showEditTEG(${m.id})">✏️</button>
+          <button class="icon-btn" title="Remove" onclick="deleteTEG(${m.id})">🗑️</button>
+        </div>
+      </div>`).join("");
+
+    html += `
+    <div class="teg-group">
+      <div class="teg-group-header" onclick="toggleTEGGroup('${groupId}')">
+        <div class="teg-group-left">
+          <span class="teg-count-badge">${count}</span>
+          <span class="teg-model-pill ${modelCls}">${escHtml(g.model)}</span>
+          <span class="teg-group-dept">${escHtml(g.dept)}</span>
+        </div>
+        <div class="teg-group-center">
+          <div class="teg-cartridges">${cartHtml}</div>
+        </div>
+        <div class="teg-group-right">
+          <span class="teg-expand-icon" id="${groupId}-icon">›</span>
         </div>
       </div>
-      ${t.cartridge_types.length ? `
-        <div class="teg-cartridges">
-          ${t.cartridge_types.map(c=>`<span class="cart-chip">${escHtml(c)}</span>`).join("")}
-        </div>` : `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">No cartridges configured</div>`}
-      ${t.notes ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px">${escHtml(t.notes)}</div>` : ""}
-    </div>`).join("");
+      <div class="teg-group-details" id="${groupId}">${machineRows}</div>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function toggleTEGGroup(groupId) {
+  const details = document.getElementById(groupId);
+  const icon    = document.getElementById(groupId + "-icon");
+  if (!details) return;
+  const open = details.classList.toggle("open");
+  if (icon) icon.textContent = open ? "⌄" : "›";
 }
 
 // ── Cartridge & QC Tally ──────────────────────────────────────────────
@@ -718,7 +782,11 @@ function renderActivityLog(comms, contacts) {
 
 // ── TEG Modals ────────────────────────────────────────────────────────
 const TEG_MODELS = ["TEG 5000", "TEG 6s", "TEGfunctional"];
-const TEG_DEPTS  = ["OR","CVICU","ICU","Cath Lab","ED","NICU","PACU","Labor & Delivery","Other"];
+const TEG_DEPTS  = [
+  "CVOR","OR","Trauma OR","Trauma Bay","CVICU","TICU","SICU","MICU","ICU",
+  "Resus","Cath Lab","ED","NICU","PACU","Burn Unit","Transplant ICU",
+  "Labor & Delivery","Other"
+];
 const CART_TYPES = [
   "Kaolin (K)","Kaolin + Heparinase (KH)","RapidTEG (RT)","Platelet Mapping (PM)",
   "Functional Fibrinogen (FF)","Citrated Kaolin (CK)","CKH","CKHF","CFF-TEG",
@@ -1097,7 +1165,7 @@ async function syncEmail() {
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
 async function syncNotes() {
-  try { const r = await post("/api/sync/notes",{}); toast(r.message,"info"); }
+  try { const r = await post("/api/sync/notes",{}); toast(r.message, r.ok===false?"error":"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
 async function syncDrive() {
@@ -1105,7 +1173,11 @@ async function syncDrive() {
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
 async function synciMessage() {
-  try { const r = await post("/api/sync/imessage",{}); toast(r.message,"info"); }
+  try { const r = await post("/api/sync/imessage",{}); toast(r.message, r.ok===false?"error":"info"); }
+  catch(e) { toast("Sync failed: "+e.message,"error"); }
+}
+async function syncContacts() {
+  try { const r = await post("/api/sync/contacts",{}); toast(r.message, r.ok===false?"error":"info"); }
   catch(e) { toast("Sync failed: "+e.message,"error"); }
 }
 async function syncSalesforce() {
@@ -1146,6 +1218,7 @@ function renderIntegrationsPage(s) {
     renderEmailParserCard(s.email_parser),
     renderiMessageCard(s.imessage),
     renderAppleNotesCard(s.apple_notes),
+    renderAppleContactsCard(s.apple_contacts),
   ].join("");
 }
 
@@ -1391,6 +1464,39 @@ function renderAppleNotesCard(an) {
              <button class="btn btn-sm btn-ghost" onclick="syncNotes()">&#128221; Sync Notes Now</button>
            </div>`
         : `<div class="integration-note">${escHtml(an?.platform_note||"Requires a Mac.")}</div>`
+      }
+    </div>
+  </div>`;
+}
+
+function renderAppleContactsCard(ac) {
+  const available = ac?.available;
+  return `<div class="integration-card">
+    <div class="integration-card-header">
+      <span class="integration-icon">👤</span>
+      <div class="integration-info">
+        <div class="integration-name">Apple Contacts</div>
+        <div class="integration-desc">Import contacts &amp; roles from Contacts.app (Mac only)</div>
+      </div>
+      <span class="integration-status ${available ? "not-connected" : "unavailable"}">
+        <span class="status-dot"></span>${available ? "Available" : "Mac Only"}
+      </span>
+    </div>
+    <div class="integration-body">
+      ${available
+        ? `<p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+             Reads all contacts from your Mac's Contacts app. Fuzzy-matches each contact's
+             <strong>organization</strong> to a hospital account and imports them with their
+             <strong>job title as the role</strong>. Existing contacts (matched by phone or email) are skipped.
+           </p>
+           <div class="integration-note" style="margin-bottom:12px">
+             &#128161; Grant <strong>Contacts</strong> access to Terminal in
+             <em>System Settings → Privacy &amp; Security → Contacts</em> if prompted.
+           </div>
+           <div class="integration-actions">
+             <button class="btn btn-sm btn-ghost" onclick="syncContacts()">&#128100; Sync Contacts Now</button>
+           </div>`
+        : `<div class="integration-note">${escHtml(ac?.platform_note || "Requires a Mac.")}</div>`
       }
     </div>
   </div>`;

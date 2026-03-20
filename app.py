@@ -133,6 +133,10 @@ def api_integrations_status():
             "available": is_mac,
             "platform_note": "Apple Notes sync requires a Mac running this app locally.",
         },
+        "apple_contacts": {
+            "available": is_mac,
+            "platform_note": "Apple Contacts sync requires a Mac running this app locally.",
+        },
         "setup_complete": bool(db.get_setting("setup_complete")),
     })
 
@@ -489,16 +493,16 @@ def api_sync_email():
 
 @app.route("/api/sync/notes", methods=["POST"])
 def api_sync_notes():
+    import platform
+    if platform.system() != "Darwin":
+        return jsonify({"ok": False, "message": "Apple Notes sync requires macOS — not available on this system."})
+
     def _run():
-        import platform
-        if platform.system() == "Darwin":
-            try:
-                from integrations.apple_notes import sync_apple_notes
-                sync_apple_notes()
-            except Exception as e:
-                log.warning("Apple Notes sync failed: %s", e)
-        else:
-            log.info("Apple Notes sync skipped — not on Mac")
+        try:
+            from integrations.apple_notes import sync_apple_notes
+            sync_apple_notes()
+        except Exception as e:
+            log.warning("Apple Notes sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing notes from Apple Notes..."})
@@ -519,20 +523,38 @@ def api_sync_sf():
 
 @app.route("/api/sync/imessage", methods=["POST"])
 def api_sync_imessage():
+    import platform
+    if platform.system() != "Darwin":
+        return jsonify({"ok": False, "message": "iMessage sync requires macOS — not available on this system."})
+
     def _run():
-        import platform
-        if platform.system() == "Darwin":
-            try:
-                from integrations.imessage import sync_imessage
-                result = sync_imessage()
-                log.info("iMessage sync: %s", result)
-            except Exception as e:
-                log.warning("iMessage sync failed: %s", e)
-        else:
-            log.info("iMessage sync skipped — not on Mac")
+        try:
+            from integrations.imessage import sync_imessage
+            result = sync_imessage()
+            log.info("iMessage sync: %s", result)
+        except Exception as e:
+            log.warning("iMessage sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing iMessage communication history..."})
+
+
+@app.route("/api/sync/contacts", methods=["POST"])
+def api_sync_contacts():
+    import platform
+    if platform.system() != "Darwin":
+        return jsonify({"ok": False, "message": "Apple Contacts sync requires macOS — not available on this system."})
+
+    def _run():
+        try:
+            from integrations.apple_contacts import sync_apple_contacts
+            result = sync_apple_contacts()
+            log.info("Apple Contacts sync: %s", result)
+        except Exception as e:
+            log.warning("Apple Contacts sync failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing contacts from Apple Contacts..."})
 
 
 @app.route("/api/sync/drive", methods=["POST"])

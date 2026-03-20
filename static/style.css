@@ -771,58 +771,143 @@ label {
 /* ── TEG Inventory Panel ────────────────────────────────────────────── */
 .teg-list-body { padding: 0; }
 
-.teg-card {
-  border-bottom: 1px solid rgba(42, 46, 63, 0.6);
-  padding: 14px 20px;
-  transition: background 0.15s;
-}
-.teg-card:last-child { border-bottom: none; }
-.teg-card:hover { background: var(--bg-card-hover); }
+/* ── Grouped TEG view ── */
+.teg-group { border-bottom: 1px solid rgba(42, 46, 63, 0.6); }
+.teg-group:last-child { border-bottom: none; }
 
-.teg-card-header {
+.teg-group-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  cursor: pointer;
+  transition: background 0.13s;
+  user-select: none;
 }
-.teg-location {
+.teg-group-header:hover { background: var(--bg-card-hover); }
+
+.teg-group-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.teg-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  font-size: 0.72rem;
   font-weight: 700;
-  font-size: 0.9rem;
-  line-height: 1.3;
+  background: rgba(79, 110, 247, 0.18);
+  color: var(--accent);
+  flex-shrink: 0;
 }
-.teg-dept {
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-.teg-model {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-}
-.teg-serial {
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-.teg-cartridges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 8px;
-}
-.cart-chip {
-  padding: 3px 8px;
+
+/* Model pills — color-coded by machine family */
+.teg-model-pill {
+  padding: 2px 8px;
   border-radius: 4px;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.teg-model-pill.model-5000 {
+  background: rgba(20, 184, 166, 0.15);
+  color: #2dd4bf;
+  border: 1px solid rgba(20, 184, 166, 0.3);
+}
+.teg-model-pill.model-6s {
+  background: rgba(79, 110, 247, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(79, 110, 247, 0.3);
+}
+.teg-model-pill.model-func {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.teg-model-pill.model-other {
+  background: rgba(100, 116, 139, 0.15);
+  color: var(--text-secondary);
+  border: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.teg-group-dept {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.teg-group-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.teg-group-right { flex-shrink: 0; margin-left: auto; }
+
+.teg-expand-icon {
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  line-height: 1;
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+}
+
+/* Machine detail rows — collapsed by default */
+.teg-group-details {
+  display: none;
+  background: rgba(0, 0, 0, 0.12);
+  border-top: 1px solid rgba(42, 46, 63, 0.4);
+}
+.teg-group-details.open { display: block; }
+
+.teg-machine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 16px 7px 28px;
+  border-bottom: 1px solid rgba(42, 46, 63, 0.3);
+  gap: 8px;
+}
+.teg-machine-row:last-child { border-bottom: none; }
+
+.teg-machine-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.teg-machine-loc { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); }
+.teg-machine-serial { font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); }
+.teg-machine-notes { font-size: 0.72rem; color: var(--text-muted); font-style: italic; }
+
+.teg-cartridges { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.cart-chip {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.68rem;
   font-weight: 600;
   background: rgba(79, 110, 247, 0.1);
   color: var(--accent);
   border: 1px solid rgba(79, 110, 247, 0.2);
+  white-space: nowrap;
 }
+
 .teg-actions { display: flex; gap: 4px; flex-shrink: 0; }
 
 .teg-empty {
