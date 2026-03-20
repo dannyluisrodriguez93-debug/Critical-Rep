@@ -323,6 +323,7 @@ function renderAccountHomepage(data) {
   renderCommActivity(cstats);
   renderTargets(tgts);
   renderRecentOrders(ords);
+  renderOverviewContacts(ctcts);
   renderSalesTable(sales);
   renderContacts(ctcts, cstats);
   renderNotes(notes);
@@ -606,6 +607,31 @@ function renderSalesTable(sales) {
     <td class="right mono green">${fmtCurrency(s.total_revenue)}</td>
     <td class="mono">${fmtDate(s.last_order_date)}</td>
   </tr>`).join("") + "</tbody></table>";
+}
+
+// ── Overview Contacts (compact) ───────────────────────────────────────
+function renderOverviewContacts(contacts) {
+  const el = document.getElementById("overview-contacts");
+  if (!el) return;
+  if (!contacts.length) {
+    el.innerHTML = `<div class="empty-state">No contacts yet. <button class="btn btn-sm btn-ghost" onclick="syncContacts()">Sync Contacts</button></div>`;
+    return;
+  }
+  // Show up to 8 contacts in a compact list
+  const shown = contacts.slice(0, 8);
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">` +
+    shown.map(c => `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border)">
+      <div style="width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:0.8rem;flex-shrink:0">${escHtml((c.name||"?")[0].toUpperCase())}</div>
+      <div style="min-width:0">
+        <div style="font-weight:600;font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.name)}</div>
+        ${c.role ? `<div style="font-size:0.75rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(c.role)}</div>` : ""}
+        <div style="font-size:0.72rem;color:var(--text-muted)">
+          ${c.phone ? `${escHtml(c.phone)}` : ""}${c.phone && c.email ? " · " : ""}${c.email ? `${escHtml(c.email)}` : ""}
+        </div>
+      </div>
+    </div>`).join("") +
+    `</div>` +
+    (contacts.length > 8 ? `<div style="text-align:center;margin-top:8px"><button class="btn btn-sm btn-ghost" onclick="activateTab('tab-contacts')">View all ${contacts.length} contacts</button></div>` : "");
 }
 
 // ── Contacts Tab ──────────────────────────────────────────────────────

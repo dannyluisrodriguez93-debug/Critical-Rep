@@ -567,6 +567,24 @@ def api_sync_imessage():
     return jsonify({"ok": True, "message": "Syncing iMessage communication history..."})
 
 
+@app.route("/api/sync/macos-contacts", methods=["POST"])
+def api_sync_macos_contacts():
+    def _run():
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.macos_contacts import sync_macos_contacts
+                result = sync_macos_contacts()
+                log.info("macOS Contacts sync: %s", result)
+            except Exception as e:
+                log.warning("macOS Contacts sync failed: %s", e)
+        else:
+            log.info("macOS Contacts sync skipped — not on Mac")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing macOS Contacts..."})
+
+
 @app.route("/api/sync/drive", methods=["POST"])
 def api_sync_drive():
     def _run():
@@ -598,15 +616,25 @@ def api_sync_sheets():
 @app.route("/api/sync/contacts", methods=["POST"])
 def api_sync_contacts():
     def _run():
+        # Sync Google Contacts
         try:
             from integrations.google_contacts import sync_google_contacts
             result = sync_google_contacts()
             log.info("Google Contacts sync: %s", result)
         except Exception as e:
             log.warning("Google Contacts sync failed: %s", e)
+        # Sync macOS/iOS Contacts
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.macos_contacts import sync_macos_contacts
+                result = sync_macos_contacts()
+                log.info("macOS Contacts sync: %s", result)
+            except Exception as e:
+                log.warning("macOS Contacts sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing Google Contacts..."})
+    return jsonify({"ok": True, "message": "Syncing contacts (Google + iOS)..."})
 
 
 @app.route("/api/accounts/geocode", methods=["POST"])

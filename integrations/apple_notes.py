@@ -157,12 +157,17 @@ def sync_apple_notes() -> int:
     note_stubs = get_all_notes_bulk()
     log.info("Apple Notes: found %d notes, matching titles to accounts...", len(note_stubs))
 
+    # Pre-build a lookup for substring matching: list of (lowercase_name, account_id)
+    alias_lookup = [(n.lower(), aid) for n, aid in account_names_ids]
+    # Sort longest-first so "Jackson South" matches before "Jackson"
+    alias_lookup.sort(key=lambda x: len(x[0]), reverse=True)
+
     synced = 0
     for note in note_stubs:
         title = note["title"]
         note_index = note.get("_index")
 
-        # Match title to an account
+        # --- Strategy 1: Fuzzy match on title (existing) ---
         account_id = None
         match = process.extractOne(title, all_names, scorer=fuzz.token_sort_ratio)
         if match and match[1] >= 60:
@@ -171,15 +176,42 @@ def sync_apple_notes() -> int:
                 (aid for n, aid in account_names_ids if n == matched_name), None
             )
 
+        # --- Strategy 2: Exact substring match of aliases against title ---
+        if not account_id:
+            title_lower = title.lower()
+            for alias_lower, aid in alias_lookup:
+                if alias_lower in title_lower:
+                    account_id = aid
+                    log.debug("Apple Notes: substring matched %r via alias %r → account %d",
+                              title, alias_lower, aid)
+                    break
+
+        # --- Strategy 3: Scan first 500 chars of content for alias mention ---
+        prefetched_content = ""
+        if not account_id:
+            if note_index:
+                prefetched_content = get_note_content_by_index(note_index)
+            if not prefetched_content:
+                prefetched_content = get_note_content(title)
+            if prefetched_content:
+                snippet_lower = prefetched_content[:500].lower()
+                for alias_lower, aid in alias_lookup:
+                    if alias_lower in snippet_lower:
+                        account_id = aid
+                        log.debug("Apple Notes: content matched %r via alias %r → account %d",
+                                  title, alias_lower, aid)
+                        break
+
         if not account_id:
             continue
 
-        # Step 2: fetch content only for matched notes
-        content = ""
-        if note_index:
-            content = get_note_content_by_index(note_index)
+        # Fetch content for matched notes (reuse if already fetched in Strategy 3)
+        content = prefetched_content
         if not content:
-            content = get_note_content(title)
+            if note_index:
+                content = get_note_content_by_index(note_index)
+            if not content:
+                content = get_note_content(title)
 
         db.upsert_account_note(
             account_id=account_id,
