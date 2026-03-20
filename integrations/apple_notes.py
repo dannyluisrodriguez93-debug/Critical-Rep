@@ -78,16 +78,16 @@ def get_note_content(title: str) -> str:
         return unescape(raw)
 
 
-def get_all_notes_bulk() -> list[dict]:
+def get_all_note_titles_fast() -> list[str]:
     """
-    Fetch all notes in one AppleScript call for efficiency.
-    Returns list of {title, content} dicts.
+    Fetch only note titles in one fast AppleScript call.
+    Much faster than fetching bodies — used to pre-filter before fetching content.
     """
     script = """
     tell application "Notes"
         set output to ""
         repeat with n in every note
-            set output to output & "|||TITLE|||" & name of n & "|||BODY|||" & body of n & "|||END|||"
+            set output to output & "|||" & name of n
         end repeat
         return output
     end tell
@@ -95,30 +95,51 @@ def get_all_notes_bulk() -> list[dict]:
     raw = _run_applescript(script)
     if not raw:
         return []
+    return [t.strip() for t in raw.split("|||") if t.strip()]
+
+
+def get_note_content_by_index(idx: int) -> str:
+    """Fetch content of note at 1-based index (faster than searching by name)."""
+    script = f"""
+    tell application "Notes"
+        set n to item {idx} of every note
+        return body of n
+    end tell
+    """
+    raw = _run_applescript(script)
+    if not raw:
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(raw, "lxml").get_text("\n", strip=True)
+    except Exception:
+        return unescape(raw)
+
+
+def get_all_notes_bulk() -> list[dict]:
+    """
+    Fetch all notes titles first, then only fetch body content for notes
+    whose titles match account names. This avoids timeout on large collections.
+    Returns list of {title, content} dicts for ALL notes (content empty for non-matched,
+    but sync_apple_notes will only call this for matched titles).
+    """
+    # Fast title-only pass first
+    titles = get_all_note_titles_fast()
+    if not titles:
+        return []
 
     notes = []
-    for chunk in raw.split("|||END|||"):
-        chunk = chunk.strip()
-        if "|||TITLE|||" not in chunk or "|||BODY|||" not in chunk:
-            continue
-        parts = chunk.split("|||BODY|||")
-        title_part = parts[0].replace("|||TITLE|||", "").strip()
-        body_part = parts[1].strip() if len(parts) > 1 else ""
-        # Strip HTML from body
-        try:
-            from bs4 import BeautifulSoup
-            body_text = BeautifulSoup(body_part, "lxml").get_text("\n", strip=True)
-        except Exception:
-            body_text = unescape(body_part)
-        notes.append({"title": title_part, "content": body_text})
-
+    for i, title in enumerate(titles, start=1):
+        notes.append({"title": title, "content": "", "_index": i})
     return notes
 
 
 def sync_apple_notes() -> int:
     """
-    Pull all Apple Notes, fuzzy-match titles/content to accounts,
-    store matches as account_notes (source='apple_notes').
+    Pull all Apple Notes, fuzzy-match titles to accounts, fetch content only
+    for matched notes, then store as account_notes (source='apple_notes').
+
+    Strategy: titles-first approach avoids timeout on large Notes libraries.
     Returns number of notes synced.
     """
     if sys.platform != "darwin":
@@ -131,31 +152,34 @@ def sync_apple_notes() -> int:
         return 0
 
     all_names = [n for n, _ in account_names_ids]
-    notes = get_all_notes_bulk()
+
+    # Step 1: fetch titles only (fast — no body content)
+    note_stubs = get_all_notes_bulk()
+    log.info("Apple Notes: found %d notes, matching titles to accounts...", len(note_stubs))
+
     synced = 0
-
-    for note in notes:
+    for note in note_stubs:
         title = note["title"]
-        content = note["content"]
+        note_index = note.get("_index")
 
-        # Match by title first
+        # Match title to an account
         account_id = None
         match = process.extractOne(title, all_names, scorer=fuzz.token_sort_ratio)
-        if match and match[1] >= 70:
+        if match and match[1] >= 60:
             matched_name = match[0]
             account_id = next(
                 (aid for n, aid in account_names_ids if n == matched_name), None
             )
 
-        # Fallback: scan content for account name mentions
-        if not account_id:
-            for name, aid in account_names_ids:
-                if len(name) > 8 and name.lower() in content.lower():
-                    account_id = aid
-                    break
-
         if not account_id:
             continue
+
+        # Step 2: fetch content only for matched notes
+        content = ""
+        if note_index:
+            content = get_note_content_by_index(note_index)
+        if not content:
+            content = get_note_content(title)
 
         db.upsert_account_note(
             account_id=account_id,
@@ -165,7 +189,7 @@ def sync_apple_notes() -> int:
             note_date=None,
         )
         synced += 1
-        log.debug("Synced Apple Note %r → account %d", title, account_id)
+        log.info("Apple Notes: synced %r → account %d", title, account_id)
 
     log.info("Apple Notes sync: %d notes matched to accounts", synced)
     return synced

@@ -67,6 +67,7 @@ def get_auth_url() -> Optional[str]:
             access_type="offline",
             include_granted_scopes="true",
             prompt="consent",
+            login_hint="dannyhaemonetics@gmail.com",
         )
         # Save state and code_verifier (PKCE) so the callback can use them
         db.set_setting("google_oauth_state", _state)

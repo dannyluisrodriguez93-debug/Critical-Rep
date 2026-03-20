@@ -1201,7 +1201,7 @@ function renderGoogleCard(g) {
          </div>
          <div class="form-group">
            <label>Google Client Secret</label>
-           <input type="password" id="g-client-secret" placeholder="${g?.client_id ? '(saved — enter new value to change)' : 'GOCSPX-…'}">
+           <input type="password" id="g-client-secret" placeholder="${g?.configured ? '(saved — enter new value to change)' : 'GOCSPX-…'}">
          </div>
        </div>
        <div class="integration-actions">
