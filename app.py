@@ -12,6 +12,8 @@ from datetime import datetime
 
 # Allow Google OAuth over plain http://localhost (safe for local dev)
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+# Allow Google to return a superset of requested scopes (happens with include_granted_scopes)
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from flask import Flask, jsonify, redirect, render_template, request, abort, url_for
 
@@ -23,6 +25,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
+# Also write to /tmp/account_hub.log so OAuth errors are always capturable
+_file_handler = logging.FileHandler("/tmp/account_hub.log")
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s — %(message)s"))
+logging.getLogger().addHandler(_file_handler)
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -178,6 +185,28 @@ def google_disconnect():
     from integrations.google_auth import disconnect
     disconnect()
     return jsonify({"ok": True})
+
+
+@app.route("/integrations/google/test")
+def google_test():
+    """Verify the stored token works by fetching the connected user's profile."""
+    from integrations.google_auth import get_credentials, get_connected_email
+    creds = get_credentials()
+    if not creds:
+        return jsonify({"ok": False, "message": "Not connected — no stored token."})
+    try:
+        from googleapiclient.discovery import build
+        service = build("oauth2", "v2", credentials=creds)
+        info = service.userinfo().get().execute()
+        return jsonify({
+            "ok": True,
+            "email": info.get("email"),
+            "name": info.get("name"),
+            "picture": info.get("picture"),
+        })
+    except Exception as e:
+        log.error("Google token test failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "message": f"Token test failed: {e}"})
 
 
 # ── Salesforce test ────────────────────────────────────────────────────────────
