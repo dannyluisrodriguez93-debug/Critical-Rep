@@ -1176,18 +1176,18 @@ function renderGoogleCard(g) {
            <li>Click <strong>APIs & Services → Enable APIs</strong> — enable <strong>Gmail API</strong> and <strong>Google Drive API</strong></li>
            <li>Click <strong>APIs & Services → OAuth consent screen</strong> → External → fill in your app name</li>
            <li>Click <strong>Credentials → Create Credentials → OAuth 2.0 Client ID</strong> → Web application</li>
-           <li>Under <em>Authorized redirect URIs</em>, add: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
+           <li>Under <em>Authorized redirect URIs</em>, add: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">${window.location.origin}/integrations/google/callback</code></li>
            <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> and paste them below</li>
          </ol>
        </div>
        <div class="integration-form">
          <div class="form-group">
            <label>Google Client ID</label>
-           <input type="text" id="g-client-id" placeholder="…apps.googleusercontent.com">
+           <input type="text" id="g-client-id" placeholder="…apps.googleusercontent.com" value="${escHtml(g?.client_id||'')}">
          </div>
          <div class="form-group">
            <label>Google Client Secret</label>
-           <input type="password" id="g-client-secret" placeholder="GOCSPX-…">
+           <input type="password" id="g-client-secret" placeholder="${g?.client_id ? '(saved — enter new value to change)' : 'GOCSPX-…'}">
          </div>
        </div>
        <div class="integration-actions">
@@ -1210,9 +1210,12 @@ function renderGoogleCard(g) {
 async function googleSaveAndConnect() {
   const cid  = document.getElementById("g-client-id")?.value?.trim();
   const csec = document.getElementById("g-client-secret")?.value?.trim();
-  if (!cid || !csec) { toast("Please enter both Client ID and Client Secret", "error"); return; }
+  if (!cid) { toast("Please enter your Google Client ID", "error"); return; }
+  const payload = { google_client_id: cid };
+  if (csec) payload.google_client_secret = csec;
+  else if (!_intStatus?.google?.client_id) { toast("Please enter your Google Client Secret", "error"); return; }
   try {
-    await post("/api/settings", { google_client_id: cid, google_client_secret: csec });
+    await post("/api/settings", payload);
     toast("Credentials saved — redirecting to Google…", "info");
     setTimeout(() => { window.location.href = "/integrations/google/start"; }, 800);
   } catch(e) { toast("Failed to save: " + e.message, "error"); }
@@ -1460,7 +1463,7 @@ function renderWizardStep() {
                   <li>Go to <a href="https://console.cloud.google.com/" target="_blank">console.cloud.google.com</a> (free)</li>
                   <li>Create a project → Enable <strong>Gmail API</strong> and <strong>Google Drive API</strong></li>
                   <li>Create OAuth 2.0 credentials → Web application</li>
-                  <li>Add this redirect URI: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">http://localhost:5000/integrations/google/callback</code></li>
+                  <li>Add this redirect URI: <code style="font-family:var(--font-mono);background:var(--bg-surface);padding:2px 6px;border-radius:4px">${window.location.origin}/integrations/google/callback</code></li>
                   <li>Paste your Client ID and Secret below</li>
                 </ol>
               </div>

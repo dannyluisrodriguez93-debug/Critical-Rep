@@ -22,7 +22,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
     "openid",
-    "email",
+    "https://www.googleapis.com/auth/userinfo.email",
 ]
 
 # ── Salesforce (filled in via UI — stored in DB settings) ─────────────────────

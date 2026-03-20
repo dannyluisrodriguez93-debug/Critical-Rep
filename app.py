@@ -109,10 +109,13 @@ def api_integrations_status():
     import platform
     is_mac = platform.system() == "Darwin"
 
+    google_client_id = db.get_setting("google_client_id") or config.GOOGLE_CLIENT_ID
+
     return jsonify({
         "google": {
             "connected":  google_connected,
             "configured": is_configured(),
+            "client_id":  google_client_id or "",
             "email":      google_email,
             "covers":     ["Gmail", "Google Drive"],
         },
