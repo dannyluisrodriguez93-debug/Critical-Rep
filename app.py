@@ -546,7 +546,7 @@ def api_sync_sf():
             log.warning("Salesforce sync failed: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing Salesforce contacts + opportunities..."})
+    return jsonify({"ok": True, "message": "Syncing Salesforce contacts, opportunities, and shipments..."})
 
 
 @app.route("/api/sync/imessage", methods=["POST"])
