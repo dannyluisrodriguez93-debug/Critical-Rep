@@ -50,6 +50,13 @@ def fetch_report_emails(days_back: int = 7) -> list[dict]:
     senders_setting = db.get_setting("report_senders")
     senders = [s.strip() for s in senders_setting.split(",")] if senders_setting else config.REPORT_SENDERS
 
+    # Always include oracle_sender in the fetch list (may be configured separately)
+    oracle_setting = db.get_setting("oracle_sender") or config.ORACLE_SENDER
+    for addr in oracle_setting.split(","):
+        addr = addr.strip().lower()
+        if addr and addr not in [s.lower() for s in senders]:
+            senders.append(addr)
+
     if not senders:
         log.warning("Gmail: no report senders configured — skipping email sync")
         return []

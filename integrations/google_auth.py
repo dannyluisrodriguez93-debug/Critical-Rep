@@ -67,9 +67,11 @@ def get_auth_url() -> Optional[str]:
             access_type="offline",
             include_granted_scopes="true",
             prompt="consent",
+            login_hint="dannyhaemonetics@gmail.com",
         )
-        # Save state for CSRF protection
+        # Save state and code_verifier (PKCE) so the callback can use them
         db.set_setting("google_oauth_state", _state)
+        db.set_setting("google_code_verifier", flow.code_verifier)
         return auth_url
     except ImportError:
         log.error("google-auth-oauthlib not installed. Run: pip install google-auth-oauthlib")
@@ -92,6 +94,14 @@ def handle_callback(authorization_response: str, state: str = None) -> tuple[boo
     try:
         from google_auth_oauthlib.flow import Flow
         flow = _build_flow(client_id, client_secret)
+        # Restore state — a fresh Flow has a random state that won't match the callback URL
+        saved_state = state or db.get_setting("google_oauth_state")
+        if saved_state:
+            flow.oauth2session.state = saved_state
+        # Restore PKCE code_verifier — required if the auth URL included a code_challenge
+        code_verifier = db.get_setting("google_code_verifier")
+        if code_verifier:
+            flow.code_verifier = code_verifier
         flow.fetch_token(authorization_response=authorization_response)
         creds = flow.credentials
 
@@ -161,6 +171,7 @@ def disconnect():
     db.set_setting("google_token", None)
     db.set_setting("google_email", None)
     db.set_setting("google_oauth_state", None)
+    db.set_setting("google_code_verifier", None)
     log.info("Google account disconnected")
 
 

@@ -77,8 +77,9 @@ def sync_google_drive_files() -> dict:
         seen_queries.add(query)
 
         try:
+            safe_query = query.replace("'", "\\'")
             results = service.files().list(
-                q=f"name contains '{query}' and trashed=false",
+                q=f"name contains '{safe_query}' and trashed=false",
                 fields="files(id,name,webViewLink,size,modifiedTime,mimeType,parents)",
                 pageSize=25,
             ).execute()
