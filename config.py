@@ -27,11 +27,18 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
 ]
 
-# ── Salesforce (filled in via UI — stored in DB settings) ─────────────────────
+# ── Salesforce OAuth (filled in via UI — stored in DB settings) ───────────────
+# OAuth 2.0 Web Server Flow — requires a Salesforce Connected App.
+# Users enter Consumer Key + Secret through the Integrations page.
+SF_CLIENT_ID      = os.getenv("SF_CLIENT_ID", "")
+SF_CLIENT_SECRET  = os.getenv("SF_CLIENT_SECRET", "")
+SF_REDIRECT_URI   = os.getenv("SF_REDIRECT_URI", f"http://localhost:{int(os.getenv('PORT', 5000))}/integrations/salesforce/callback")
+SF_DOMAIN         = os.getenv("SF_DOMAIN", "login")
+
+# Legacy username/password auth (fallback if OAuth not configured)
 SF_USERNAME       = os.getenv("SF_USERNAME", "")
 SF_PASSWORD       = os.getenv("SF_PASSWORD", "")
 SF_SECURITY_TOKEN = os.getenv("SF_SECURITY_TOKEN", "")
-SF_DOMAIN         = os.getenv("SF_DOMAIN", "login")
 
 # ── Email report parsing ───────────────────────────────────────────────────────
 # Comma-separated list of allowed sender addresses.

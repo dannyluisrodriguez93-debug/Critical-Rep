@@ -21,6 +21,33 @@ log = logging.getLogger(__name__)
 # Minimum score to accept a company→account match
 MATCH_THRESHOLD = 65
 
+# Separators used in Company fields that combine hospital name + role
+_COMPANY_SEPARATORS = [" - ", " — ", " | ", " / ", "; "]
+
+
+def _parse_company_field(company: str) -> tuple[list[str], str | None]:
+    """
+    Parse a Company field that may embed a role alongside the hospital name,
+    e.g. "St. Mary's Medical Center - Lab Director".
+
+    Returns:
+      candidates  — ordered list of strings to try for hospital matching
+                    (left part first, then right, then full string as fallback)
+      role        — extracted role string, or None if field is a plain name
+    """
+    company = (company or "").strip()
+    if not company:
+        return [], None
+
+    for sep in _COMPANY_SEPARATORS:
+        if sep in company:
+            left, right = company.split(sep, 1)
+            left, right = left.strip(), right.strip()
+            role = right if right else None
+            return [left, right, company], role
+
+    return [company], None
+
 
 def sync_google_contacts() -> dict:
     """
@@ -65,13 +92,21 @@ def sync_google_contacts() -> dict:
         email = _get_email(person)
         phone = _get_phone(person)
 
-        # Try to match by organization first, then by contact name (for individual
-        # contacts at a hospital whose name contains the hospital name)
+        # Parse the Company/org field — may contain "Hospital Name - Role"
+        company_candidates, embedded_role = _parse_company_field(org)
+
+        # Use embedded role when no explicit title is set in the Organizations field
+        effective_title = title or embedded_role
+
         account_id = None
 
-        if org:
-            account_id = _match_to_account(org, all_names, account_names_ids)
+        # Strategy 1: try each Company field candidate (left/cleaner part first)
+        for candidate in company_candidates:
+            account_id = _match_to_account(candidate, all_names, account_names_ids)
+            if account_id:
+                break
 
+        # Strategy 2: fall back to contact name
         if not account_id and name:
             account_id = _match_to_account(name, all_names, account_names_ids)
 
@@ -89,7 +124,7 @@ def sync_google_contacts() -> dict:
         db.add_contact(
             account_id=account_id,
             name=name,
-            role=title,
+            role=effective_title,
             phone=phone,
             email=email,
             notes=f"Synced from Google Contacts{' — ' + org if org else ''}",

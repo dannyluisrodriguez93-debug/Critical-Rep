@@ -19,6 +19,36 @@ log = logging.getLogger(__name__)
 
 MATCH_THRESHOLD = 60
 
+# Separators used in Company fields that combine hospital name + role
+# e.g. "St. Mary's Hospital - Lab Director"  or  "BJC Healthcare | Purchasing"
+_COMPANY_SEPARATORS = [" - ", " — ", " | ", " / ", "; "]
+
+
+def _parse_company_field(company: str) -> tuple[list[str], str | None]:
+    """
+    Parse a Company field that may embed a role alongside the hospital name,
+    e.g. "St. Mary's Medical Center - Lab Director".
+
+    Returns:
+      candidates  — ordered list of strings to try for hospital matching
+                    (left part first, then right, then full string as fallback)
+      role        — extracted role string, or None if field is a plain name
+    """
+    company = (company or "").strip()
+    if not company:
+        return [], None
+
+    for sep in _COMPANY_SEPARATORS:
+        if sep in company:
+            left, right = company.split(sep, 1)
+            left, right = left.strip(), right.strip()
+            # Left side is usually the hospital name; right is usually the role.
+            # Return left first so matching tries the cleaner hospital name first.
+            role = right if right else None
+            return [left, right, company], role
+
+    return [company], None
+
 
 def fetch_all_contacts() -> list[dict]:
     """
@@ -129,15 +159,26 @@ def sync_macos_contacts() -> dict:
 
         account_id = None
 
-        # Strategy 1: fuzzy match on organization
-        if org:
-            account_id = _match_to_account(org, all_names, account_names_ids)
+        # Parse the Company field — it may contain "Hospital Name - Role"
+        company_candidates, embedded_role = _parse_company_field(org)
 
-        # Strategy 2: substring match on organization
-        if not account_id and org:
-            account_id = _substring_match(org, alias_lookup)
+        # Use embedded role when no explicit Job Title is set
+        effective_title = title or embedded_role
 
-        # Strategy 3: fuzzy match on contact name
+        # Strategy 1: fuzzy match on each Company field candidate (left part first)
+        for candidate in company_candidates:
+            account_id = _match_to_account(candidate, all_names, account_names_ids)
+            if account_id:
+                break
+
+        # Strategy 2: substring match on each Company candidate
+        if not account_id:
+            for candidate in company_candidates:
+                account_id = _substring_match(candidate, alias_lookup)
+                if account_id:
+                    break
+
+        # Strategy 3: fuzzy match on contact name as last resort
         if not account_id and name:
             account_id = _match_to_account(name, all_names, account_names_ids)
 
@@ -154,7 +195,7 @@ def sync_macos_contacts() -> dict:
         db.add_contact(
             account_id=account_id,
             name=name,
-            role=title or None,
+            role=effective_title or None,
             phone=phone or None,
             email=email or None,
             notes="Synced from macOS Contacts" + (f" — {org}" if org else ""),
