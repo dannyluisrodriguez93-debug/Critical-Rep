@@ -98,24 +98,142 @@ def fetch_report_emails(days_back: int = 7) -> list[dict]:
 # ── HTML table parser ─────────────────────────────────────────────────────────
 
 def _parse_html_table(html: str) -> tuple[list[str], list[list[str]]]:
-    """Extract headers and rows from the first meaningful table in HTML."""
+    """Extract headers and rows from the first meaningful table in HTML.
+    Falls back to tab-delimited text parsing for forwarded plain-text emails."""
     soup = BeautifulSoup(html, "lxml")
     # find the largest table (usually the data table, not layout)
     tables = soup.find_all("table")
     best = max(tables, key=lambda t: len(t.find_all("tr")), default=None)
-    if not best:
+
+    if best:
+        headers = []
+        rows = []
+        for i, tr in enumerate(best.find_all("tr")):
+            cells = [td.get_text(strip=True) for td in tr.find_all(["th", "td"])]
+            if not any(cells):
+                continue
+            if i == 0 or not headers:
+                headers = cells
+            else:
+                rows.append(cells)
+        return headers, rows
+
+    # Fallback: parse plain-text sales data (common in forwarded Outlook emails)
+    return _parse_text_sales_lines(html)
+
+
+def _parse_text_sales_lines(html: str) -> tuple[list[str], list[list[str]]]:
+    """Parse sales data from forwarded plain-text emails using regex extraction.
+    More robust than column-position parsing for forwarded Outlook emails where
+    continuation rows omit employee name (shifting everything left)."""
+    text = BeautifulSoup(html, "lxml").get_text("\n") if "<" in html else html
+    lines = text.split("\n")
+
+    # Find the header line
+    header_idx = None
+    for i, line in enumerate(lines):
+        ll = line.lower()
+        if "item number" in ll and "revenue" in ll and "units" in ll:
+            header_idx = i
+            break
+    if header_idx is None:
         return [], []
 
-    headers = []
+    # Canonical headers for our output
+    headers = ["Employee Name", "Prod Line Desc", "Key Account Name",
+               "Prod Type Desc", "Item Number", "Item Description",
+               "TRACKING_NUMBER", "CARRIER", "Units", "Revenue"]
+
+    # Regex patterns for field extraction
+    item_re = re.compile(r'\b(\d{2}-\d{3}(?:-US)?)\b')
+    tracking_re = re.compile(r'\b(4\d{11})\b')
+    revenue_re = re.compile(r'\$([\d,]+)')
+    units_re = re.compile(r'\b(\d{1,6})\b')
+    prod_line_re = re.compile(r'\b(TEG6?)\b', re.IGNORECASE)
+    prod_type_re = re.compile(r'\b(Disposable|QC Material|Instrument|Rental|Service)\b', re.IGNORECASE)
+    carrier_re = re.compile(r'(FedEx[^$\d]*?)(?=\s+\d)')
+
     rows = []
-    for i, tr in enumerate(best.find_all("tr")):
-        cells = [td.get_text(strip=True) for td in tr.find_all(["th", "td"])]
-        if not any(cells):
+    last_prod_line = ""
+    last_account = ""
+
+    for line in lines[header_idx + 1:]:
+        stripped = line.strip()
+        if not stripped:
             continue
-        if i == 0 or not headers:
-            headers = cells
-        else:
-            rows.append(cells)
+        # Skip total lines
+        if "Total" in stripped and not item_re.search(stripped):
+            continue
+        # Must have an item number to be a data row
+        item_m = item_re.search(stripped)
+        if not item_m:
+            continue
+        # Must have revenue
+        rev_m = revenue_re.search(stripped)
+        if not rev_m:
+            continue
+
+        item_number = item_m.group(1)
+        revenue = "$" + rev_m.group(1)
+
+        # Extract tracking number
+        track_m = tracking_re.search(stripped)
+        tracking = track_m.group(1) if track_m else ""
+
+        # Extract carrier
+        carrier_m = carrier_re.search(stripped)
+        carrier = carrier_m.group(1).strip() if carrier_m else ""
+
+        # Extract units (number right before revenue)
+        # Find the number that appears just before the $ sign
+        before_rev = stripped[:rev_m.start()].rstrip()
+        units_candidates = list(units_re.finditer(before_rev))
+        units = units_candidates[-1].group(1) if units_candidates else ""
+
+        # Extract prod_line
+        pl_m = prod_line_re.search(stripped)
+        prod_line = pl_m.group(1) if pl_m else last_prod_line
+
+        # Extract prod_type
+        pt_m = prod_type_re.search(stripped)
+        prod_type = pt_m.group(1) if pt_m else ""
+
+        # Extract item description: text between item_number and tracking/carrier/units
+        desc_start = item_m.end()
+        # End at tracking, carrier, or units boundary
+        desc_end = len(stripped)
+        for boundary in [track_m, carrier_m]:
+            if boundary and boundary.start() > desc_start:
+                desc_end = min(desc_end, boundary.start())
+        # Also end before the units number if it follows the description
+        if units_candidates and units_candidates[-1].start() > desc_start:
+            # Only use as boundary if there's no carrier between
+            if not carrier_m or units_candidates[-1].start() > (carrier_m.end() if carrier_m else 0):
+                desc_end = min(desc_end, units_candidates[-1].start())
+        item_desc = stripped[desc_start:desc_end].strip()
+        # Clean up item_desc - remove prod_type if it leaked in
+        if pt_m and pt_m.group(1) in item_desc:
+            item_desc = item_desc.replace(pt_m.group(1), "").strip()
+
+        # Extract account name: text between prod_line and prod_type/item_number
+        # This is the trickiest part
+        acct_start = pl_m.end() if pl_m else 0
+        acct_end = pt_m.start() if pt_m else item_m.start()
+        account_raw = stripped[acct_start:acct_end].strip()
+        # Clean up: remove employee name if present at line start
+        if not account_raw and last_account:
+            account_raw = last_account
+
+        if account_raw:
+            last_account = account_raw
+        if prod_line:
+            last_prod_line = prod_line
+
+        row = ["", prod_line, account_raw, prod_type, item_number,
+               item_desc, tracking, carrier, units, revenue]
+        rows.append(row)
+
+    log.info("Text sales parser: extracted %d data rows", len(rows))
     return headers, rows
 
 
@@ -144,6 +262,17 @@ def parse_sales_report(html: str, report_date: str) -> int:
         log.warning("No table found in sales report")
         return 0
 
+    # Try to extract the actual report date from body text (e.g., "13-Mar-26")
+    text = BeautifulSoup(html, "lxml").get_text() if "<" in html else html
+    date_match = re.search(r'(\d{1,2})-([A-Z][a-z]{2})-(\d{2})\b', text)
+    if date_match:
+        try:
+            parsed_dt = datetime.strptime(date_match.group(), "%d-%b-%y")
+            report_date = parsed_dt.date().isoformat()
+            log.info("Extracted report date from body: %s", report_date)
+        except ValueError:
+            pass
+
     ci = {
         "account": _col_index(headers, "Key Account Name", "Account Name"),
         "prod_line": _col_index(headers, "Prod Line Desc", "Prod Line"),
@@ -159,14 +288,33 @@ def parse_sales_report(html: str, report_date: str) -> int:
     _load_name_cache()
     inserted = 0
 
+    # Carry-forward state for tab-delimited forwarded emails
+    # (continuation rows have empty account/prod_line columns)
+    last_account_raw = ""
+    last_prod_line = ""
+
     for row in rows:
         def get(key):
             idx = ci.get(key)
             return row[idx].strip() if idx is not None and idx < len(row) else ""
 
         account_raw = get("account")
+        prod_line = get("prod_line")
+
+        # Carry forward from previous row if empty (tab-delimited format)
+        if not account_raw and last_account_raw:
+            account_raw = last_account_raw
+        if not prod_line and last_prod_line:
+            prod_line = last_prod_line
+
         if not account_raw or "Total" in account_raw:
             continue
+
+        # Update carry-forward state
+        if get("account"):
+            last_account_raw = get("account")
+        if get("prod_line"):
+            last_prod_line = get("prod_line")
 
         account_id = resolve_account_name(account_raw)
         if not account_id:
@@ -180,7 +328,7 @@ def parse_sales_report(html: str, report_date: str) -> int:
         product_id = db.upsert_product(
             item_number=item_number,
             description=description,
-            prod_line=get("prod_line"),
+            prod_line=prod_line,
             prod_type=get("prod_type"),
         )
 
@@ -192,7 +340,7 @@ def parse_sales_report(html: str, report_date: str) -> int:
         ok = db.insert_sale(
             account_id=account_id,
             product_id=product_id,
-            prod_line=get("prod_line"),
+            prod_line=prod_line,
             units=units,
             revenue=revenue,
             report_date=report_date,

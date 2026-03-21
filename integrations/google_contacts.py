@@ -10,6 +10,7 @@ Requires the 'contacts.readonly' scope — added to GOOGLE_SCOPES in config.py.
 """
 
 import logging
+import re
 
 from rapidfuzz import process, fuzz
 
@@ -20,6 +21,49 @@ log = logging.getLogger(__name__)
 
 # Minimum score to accept a company→account match
 MATCH_THRESHOLD = 65
+
+# Delimiters used to separate hospital name from role in the Company field.
+# We require at least one space on BOTH sides to avoid splitting things like
+# "PGY -4", "Inc.", or hyphenated words.
+# Supported:  "Hospital Name - Role",  "Hospital / Role",  "Hospital | Role"
+_COMPANY_SPLIT_RE = re.compile(r"\s+[-/|]\s+", re.IGNORECASE)
+
+# Role-like words — if the Company field starts with one of these, skip splitting
+_ROLE_PREFIXES = {
+    "director", "manager", "coordinator", "supervisor", "specialist",
+    "nurse", "physician", "doctor", "vp ", "chief", "officer", "admin",
+    "consultant", "representative", "rep ", "analyst", "technician",
+}
+
+
+def _parse_company_field(company: str) -> tuple[str, str | None]:
+    """Split a Company field into (hospital_name, role).
+
+    Google Contacts users often put both pieces of info in the Company field:
+        "Baptist Health - Medical Director"
+        "Memorial Hospital / Case Manager"
+        "Holy Cross, Director of Pharmacy"
+
+    Returns the hospital portion cleaned up for matching, and the extracted
+    role (or None if the whole string is the hospital name).
+    """
+    if not company:
+        return company, None
+
+    parts = _COMPANY_SPLIT_RE.split(company, maxsplit=1)
+    if len(parts) < 2:
+        return company.strip(), None
+
+    hospital_part = parts[0].strip()
+    role_part = parts[1].strip()
+
+    # Sanity-check: if the first part looks like a role, don't flip them
+    first_lower = hospital_part.lower()
+    if any(first_lower.startswith(rp) for rp in _ROLE_PREFIXES):
+        # The user put the role first — use the second part as the hospital
+        return role_part, hospital_part
+
+    return hospital_part, role_part if role_part else None
 
 
 def sync_google_contacts() -> dict:
@@ -60,23 +104,37 @@ def sync_google_contacts() -> dict:
         if not name:
             continue
 
-        org   = _get_org(person)
-        title = _get_title(person)
-        email = _get_email(person)
-        phone = _get_phone(person)
+        raw_org = _get_org(person)
+        title   = _get_title(person)
+        email   = _get_email(person)
+        phone   = _get_phone(person)
 
-        # Try to match by organization first, then by contact name (for individual
-        # contacts at a hospital whose name contains the hospital name)
+        # Parse the Company field — it often contains "Hospital Name - Role Title"
+        hospital_name, extracted_role = _parse_company_field(raw_org) if raw_org else (None, None)
+
+        # Use extracted role as title fallback when the dedicated title field is empty
+        effective_title = title or extracted_role
+
+        # Try matching with the parsed hospital name first (most accurate),
+        # then fall back to the full raw company string, then the contact name.
         account_id = None
 
-        if org:
-            account_id = _match_to_account(org, all_names, account_names_ids)
+        if hospital_name and hospital_name != raw_org:
+            account_id = _match_to_account(hospital_name, all_names, account_names_ids)
+            if account_id:
+                log.debug(
+                    "Google Contacts: matched '%s' via parsed hospital '%s' (raw: '%s')",
+                    name, hospital_name, raw_org,
+                )
+
+        if not account_id and raw_org:
+            account_id = _match_to_account(raw_org, all_names, account_names_ids)
 
         if not account_id and name:
             account_id = _match_to_account(name, all_names, account_names_ids)
 
         if not account_id:
-            log.debug("Google Contacts: no account match for '%s' (org: %s)", name, org)
+            log.debug("Google Contacts: no account match for '%s' (org: %s)", name, raw_org)
             skipped += 1
             continue
 
@@ -86,16 +144,20 @@ def sync_google_contacts() -> dict:
             log.debug("Google Contacts: '%s' already in account %d", name, account_id)
             continue
 
+        notes_suffix = hospital_name or raw_org or ""
         db.add_contact(
             account_id=account_id,
             name=name,
-            role=title,
+            role=effective_title,
             phone=phone,
             email=email,
-            notes=f"Synced from Google Contacts{' — ' + org if org else ''}",
+            notes=f"Synced from Google Contacts{' — ' + notes_suffix if notes_suffix else ''}",
         )
         synced += 1
-        log.info("Google Contacts: added '%s' → account %d (%s)", name, account_id, org or "")
+        log.info(
+            "Google Contacts: added '%s' → account %d (org: %s, role: %s)",
+            name, account_id, hospital_name or raw_org or "", effective_title or "",
+        )
 
     log.info("Google Contacts: synced %d, skipped %d", synced, skipped)
     return {"synced": synced, "skipped": skipped, "total_fetched": len(contacts)}

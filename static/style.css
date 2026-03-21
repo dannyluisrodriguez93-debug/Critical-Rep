@@ -530,12 +530,27 @@ label {
   font-size: 0.85rem;
   color: var(--text-secondary);
   line-height: 1.6;
-  white-space: pre-wrap;
-  max-height: 120px;
+  max-height: 200px;
   overflow: hidden;
   position: relative;
 }
 .note-content.expanded { max-height: none; }
+.note-section-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.note-bullets {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+.note-bullets li {
+  margin-bottom: 2px;
+}
 
 /* ── Target Bars ────────────────────────────────────────────────────── */
 .target-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }

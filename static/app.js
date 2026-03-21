@@ -382,6 +382,31 @@ function renderHero(a, tgts, ords, tegs, data) {
 }
 
 // ── TEG Inventory ─────────────────────────────────────────────────────
+// Color map for cartridge types — used for rapid visual identification
+const CART_COLORS = {
+  "kaolin":             { bg: "rgba(79,110,247,0.12)",  border: "rgba(79,110,247,0.3)",  color: "#6b8aff" },
+  "heparinase":         { bg: "rgba(255,107,107,0.12)", border: "rgba(255,107,107,0.3)", color: "#ff6b6b" },
+  "kaolin+heparinase":  { bg: "rgba(255,107,107,0.12)", border: "rgba(255,107,107,0.3)", color: "#ff6b6b" },
+  "rapid teg":          { bg: "rgba(46,213,115,0.12)",  border: "rgba(46,213,115,0.3)",  color: "#2ed573" },
+  "plm":                { bg: "rgba(255,165,2,0.12)",   border: "rgba(255,165,2,0.3)",   color: "#ffa502" },
+  "platelet mapping":   { bg: "rgba(255,165,2,0.12)",   border: "rgba(255,165,2,0.3)",   color: "#ffa502" },
+  "lysis":              { bg: "rgba(162,93,220,0.12)",   border: "rgba(162,93,220,0.3)",  color: "#a25ddc" },
+  "hn":                 { bg: "rgba(255,107,107,0.12)", border: "rgba(255,107,107,0.3)", color: "#ff6b6b" },
+  "adp":                { bg: "rgba(255,215,0,0.12)",   border: "rgba(255,215,0,0.3)",   color: "#ffd700" },
+  "global hemostasis":  { bg: "rgba(0,206,209,0.12)",   border: "rgba(0,206,209,0.3)",   color: "#00ced1" },
+  "kaolin+citrated":    { bg: "rgba(79,110,247,0.12)",  border: "rgba(79,110,247,0.3)",  color: "#6b8aff" },
+  "qc - normal":        { bg: "rgba(128,128,128,0.12)", border: "rgba(128,128,128,0.3)", color: "#999" },
+  "qc - high":          { bg: "rgba(128,128,128,0.12)", border: "rgba(128,128,128,0.3)", color: "#999" },
+  "qc - low":           { bg: "rgba(128,128,128,0.12)", border: "rgba(128,128,128,0.3)", color: "#999" },
+};
+const CART_DEFAULT_COLOR = { bg: "rgba(79,110,247,0.1)", border: "rgba(79,110,247,0.2)", color: "var(--accent)" };
+
+function cartChip(type) {
+  const key = type.toLowerCase().trim();
+  const c = CART_COLORS[key] || CART_DEFAULT_COLOR;
+  return `<span class="cart-chip" style="background:${c.bg};border-color:${c.border};color:${c.color}">${escHtml(type)}</span>`;
+}
+
 function renderTEGInventory(tegs) {
   const el = document.getElementById("teg-list");
   document.getElementById("teg-total-count").textContent = tegs.length;
@@ -394,25 +419,40 @@ function renderTEGInventory(tegs) {
     </div>`; return;
   }
 
-  el.innerHTML = tegs.map(t => `
+  // Consolidate TEGs by (department, location, model, cartridge set)
+  const groups = {};
+  for (const t of tegs) {
+    const carts = (t.cartridge_types || []).slice().sort().join("|");
+    const key = `${t.department||"—"}::${t.location}::${t.model||"TEG Analyzer"}::${carts}`;
+    if (!groups[key]) {
+      groups[key] = { dept: t.department||"—", location: t.location, model: t.model||"TEG Analyzer",
+        cartridge_types: t.cartridge_types || [], count: 0, ids: [], notes: [] };
+    }
+    groups[key].count++;
+    groups[key].ids.push(t.id);
+    if (t.notes) groups[key].notes.push(t.notes);
+  }
+
+  const consolidated = Object.values(groups).sort((a,b) =>
+    a.dept.localeCompare(b.dept) || a.location.localeCompare(b.location));
+
+  el.innerHTML = consolidated.map(g => `
     <div class="teg-card">
       <div class="teg-card-header">
         <div>
-          <div class="teg-dept">${escHtml(t.department||"—")}</div>
-          <div class="teg-location">${escHtml(t.location)}</div>
-          <div class="teg-model">${escHtml(t.model||"TEG Analyzer")}</div>
-          ${t.serial_number ? `<div class="teg-serial">S/N: ${escHtml(t.serial_number)}</div>` : ""}
+          <div class="teg-dept">${escHtml(g.dept)}</div>
+          <div class="teg-location">${g.count}x ${escHtml(g.model)} in ${escHtml(g.location)}</div>
         </div>
         <div class="teg-actions">
-          <button class="icon-btn" title="Edit" onclick="showEditTEG(${t.id})">✏️</button>
-          <button class="icon-btn" title="Remove" onclick="deleteTEG(${t.id})">🗑️</button>
+          <button class="icon-btn" title="Edit first" onclick="showEditTEG(${g.ids[0]})">✏️</button>
         </div>
       </div>
-      ${t.cartridge_types.length ? `
+      ${g.cartridge_types.length ? `
         <div class="teg-cartridges">
-          ${t.cartridge_types.map(c=>`<span class="cart-chip">${escHtml(c)}</span>`).join("")}
+          <span style="font-size:0.72rem;color:var(--text-muted);margin-right:4px">runs</span>
+          ${g.cartridge_types.map(c => cartChip(c)).join("")}
         </div>` : `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">No cartridges configured</div>`}
-      ${t.notes ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:6px">${escHtml(t.notes)}</div>` : ""}
+      ${g.notes.length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px">${escHtml(g.notes[0])}</div>` : ""}
     </div>`).join("");
 }
 
@@ -678,14 +718,31 @@ function renderNotes(notes) {
   document.getElementById("notes-sources").textContent =
     sources.length ? `Sources: ${sources.join(", ")}` : "";
   if (!notes.length) { el.innerHTML = `<div class="empty-state">No notes yet.</div>`; return; }
-  el.innerHTML = notes.map(n => `<div class="note-item">
-    <div class="note-header">
-      <span class="note-title">${escHtml(n.title||"Untitled")}</span>
-      <span class="note-source">${escHtml(n.source)}</span>
-      <span class="note-date">${fmtDate(n.note_date||n.updated_at)}</span>
-    </div>
-    <div class="note-content">${escHtml(n.content||"")}</div>
-  </div>`).join("");
+  el.innerHTML = notes.map(n => {
+    // Format content: convert bullet lines to proper HTML list
+    const raw = n.content || "";
+    const lines = raw.split("\n").filter(l => l.trim());
+    let contentHtml = "";
+    const titleLine = lines[0] && lines[0].startsWith("[") ? lines.shift() : null;
+    const bullets = lines.filter(l => /^[-*•]/.test(l.trim()));
+    if (bullets.length > 0) {
+      const nonBullets = lines.filter(l => !/^[-*•]/.test(l.trim()));
+      contentHtml = nonBullets.map(l => `<div>${escHtml(l)}</div>`).join("");
+      contentHtml += "<ul class='note-bullets'>" + bullets.map(l =>
+        `<li>${escHtml(l.replace(/^[-*•]\s*/, ""))}</li>`).join("") + "</ul>";
+    } else {
+      contentHtml = lines.map(l => `<div>${escHtml(l)}</div>`).join("");
+    }
+    if (titleLine) contentHtml = `<div class="note-section-label">${escHtml(titleLine)}</div>` + contentHtml;
+    return `<div class="note-item">
+      <div class="note-header">
+        <span class="note-title">${escHtml(n.title||"Untitled")}</span>
+        <span class="note-source">${escHtml(n.source)}</span>
+        <span class="note-date">${fmtDate(n.note_date||n.updated_at)}</span>
+      </div>
+      <div class="note-content">${contentHtml}</div>
+    </div>`;
+  }).join("");
 }
 
 // ── Files Tab ─────────────────────────────────────────────────────────
