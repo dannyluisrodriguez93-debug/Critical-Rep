@@ -21,21 +21,27 @@ GOOGLE_REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI", f"http://localhost:{int(
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",
     "openid",
-    "email",
+    "https://www.googleapis.com/auth/userinfo.email",
 ]
-
-# ── Salesforce (filled in via UI — stored in DB settings) ─────────────────────
-SF_USERNAME       = os.getenv("SF_USERNAME", "")
-SF_PASSWORD       = os.getenv("SF_PASSWORD", "")
-SF_SECURITY_TOKEN = os.getenv("SF_SECURITY_TOKEN", "")
-SF_DOMAIN         = os.getenv("SF_DOMAIN", "login")
 
 # ── Email report parsing ───────────────────────────────────────────────────────
+# Comma-separated list of allowed sender addresses.
+# Tableau sends daily sales/revenue reports; Oracle sends supply order confirmations.
+# Override via REPORT_SENDERS env var or the "report_senders" DB setting (Integrations page).
 REPORT_SENDERS = [
     s.strip()
-    for s in os.getenv("REPORT_SENDERS", "tableau-no-reply@haemonetics.com").split(",")
+    for s in os.getenv(
+        "REPORT_SENDERS",
+        "tableau-no-reply@haemonetics.com,oracle-no-reply@haemonetics.com",
+    ).split(",")
 ]
+
+# Oracle order notification sender — can be set independently if Oracle uses a
+# different address from the comma-separated REPORT_SENDERS list above.
+ORACLE_SENDER = os.getenv("ORACLE_SENDER", "oracle-no-reply@haemonetics.com")
 
 # ── Alert thresholds ──────────────────────────────────────────────────────────
 MTD_ALERT_PCT     = 60   # flag if MTD % of target is below this

@@ -12,6 +12,8 @@ from datetime import datetime
 
 # Allow Google OAuth over plain http://localhost (safe for local dev)
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
+# Allow Google to return a superset of requested scopes (happens with include_granted_scopes)
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 from flask import Flask, jsonify, redirect, render_template, request, abort, url_for
 
@@ -23,6 +25,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
+# Also write to /tmp/account_hub.log so OAuth errors are always capturable
+_file_handler = logging.FileHandler("/tmp/account_hub.log")
+_file_handler.setLevel(logging.INFO)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s — %(message)s"))
+logging.getLogger().addHandler(_file_handler)
 log = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -44,7 +51,7 @@ def index():
 
 # ── Settings API ──────────────────────────────────────────────────────────────
 
-MASKED_KEYS = {"google_client_secret", "sf_password", "sf_security_token", "google_token"}
+MASKED_KEYS = {"google_client_secret", "google_token"}
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -66,7 +73,6 @@ def api_save_settings():
     body = request.get_json(force=True)
     allowed = {
         "google_client_id", "google_client_secret",
-        "sf_username", "sf_password", "sf_security_token", "sf_domain",
         "report_senders",
         "setup_complete",
         "alert_mtd_pct", "alert_reorder_days",
@@ -91,12 +97,6 @@ def api_integrations_status():
     google_connected = is_connected()
     google_email = get_connected_email() if google_connected else None
 
-    # Salesforce status
-    sf_user = db.get_setting("sf_username") or config.SF_USERNAME
-    sf_pass = db.get_setting("sf_password") or config.SF_PASSWORD
-    sf_token = db.get_setting("sf_security_token") or config.SF_SECURITY_TOKEN
-    sf_configured = bool(sf_user and sf_pass)
-
     # Report senders
     report_senders = db.get_setting("report_senders") or ",".join(config.REPORT_SENDERS)
 
@@ -109,16 +109,15 @@ def api_integrations_status():
     import platform
     is_mac = platform.system() == "Darwin"
 
+    google_client_id = db.get_setting("google_client_id") or config.GOOGLE_CLIENT_ID
+
     return jsonify({
         "google": {
             "connected":  google_connected,
             "configured": is_configured(),
+            "client_id":  google_client_id or "",
             "email":      google_email,
-            "covers":     ["Gmail", "Google Drive"],
-        },
-        "salesforce": {
-            "configured": sf_configured,
-            "username":   sf_user,
+            "covers":     ["Gmail", "Google Drive", "Google Sheets", "Google Contacts"],
         },
         "email_parser": {
             "active":         True,
@@ -177,44 +176,29 @@ def google_disconnect():
     return jsonify({"ok": True})
 
 
-# ── Salesforce test ────────────────────────────────────────────────────────────
-
-@app.route("/integrations/salesforce/test", methods=["POST"])
-def salesforce_test():
-    body = request.get_json(force=True)
-    username = body.get("username", "").strip()
-    password = body.get("password", "").strip()
-    token    = body.get("security_token", "").strip()
-    domain   = body.get("domain", "login").strip()
-
-    if not username or not password:
-        return jsonify({"ok": False, "message": "Username and password are required."})
-
+@app.route("/integrations/google/test")
+def google_test():
+    """Verify the stored token works by fetching the connected user's profile."""
+    from integrations.google_auth import get_credentials, get_connected_email
+    creds = get_credentials()
+    if not creds:
+        return jsonify({"ok": False, "message": "Not connected — no stored token."})
     try:
-        from simple_salesforce import Salesforce, SalesforceAuthenticationFailed
-        sf = Salesforce(
-            username=username,
-            password=password,
-            security_token=token,
-            domain=domain,
-        )
-        # Quick query to verify access
-        result = sf.query("SELECT Id, Name FROM User WHERE IsActive=true LIMIT 1")
-        # Save credentials on success
-        db.set_setting("sf_username", username)
-        db.set_setting("sf_password", password)
-        db.set_setting("sf_security_token", token)
-        db.set_setting("sf_domain", domain)
-        return jsonify({"ok": True, "message": f"Connected to Salesforce as {username}"})
+        from googleapiclient.discovery import build
+        service = build("oauth2", "v2", credentials=creds)
+        info = service.userinfo().get().execute()
+        return jsonify({
+            "ok": True,
+            "email": info.get("email"),
+            "name": info.get("name"),
+            "picture": info.get("picture"),
+        })
     except Exception as e:
-        return jsonify({"ok": False, "message": f"Connection failed: {e}"})
+        log.error("Google token test failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "message": f"Token test failed: {e}"})
 
 
-@app.route("/integrations/salesforce/disconnect", methods=["POST"])
-def salesforce_disconnect():
-    for key in ("sf_username", "sf_password", "sf_security_token"):
-        db.set_setting(key, None)
-    return jsonify({"ok": True})
+
 
 
 # ── Dashboard API ─────────────────────────────────────────────────────────────
@@ -504,17 +488,6 @@ def api_sync_notes():
     return jsonify({"ok": True, "message": "Syncing notes from Apple Notes..."})
 
 
-@app.route("/api/sync/salesforce", methods=["POST"])
-def api_sync_sf():
-    def _run():
-        try:
-            from integrations.salesforce import run_sf_sync
-            run_sf_sync()
-        except Exception as e:
-            log.warning("Salesforce sync failed: %s", e)
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Syncing Salesforce contacts + opportunities..."})
 
 
 @app.route("/api/sync/imessage", methods=["POST"])
@@ -535,6 +508,24 @@ def api_sync_imessage():
     return jsonify({"ok": True, "message": "Syncing iMessage communication history..."})
 
 
+@app.route("/api/sync/macos-contacts", methods=["POST"])
+def api_sync_macos_contacts():
+    def _run():
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.macos_contacts import sync_macos_contacts
+                result = sync_macos_contacts()
+                log.info("macOS Contacts sync: %s", result)
+            except Exception as e:
+                log.warning("macOS Contacts sync failed: %s", e)
+        else:
+            log.info("macOS Contacts sync skipped — not on Mac")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing macOS Contacts..."})
+
+
 @app.route("/api/sync/drive", methods=["POST"])
 def api_sync_drive():
     def _run():
@@ -547,6 +538,72 @@ def api_sync_drive():
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Syncing Google Drive files..."})
+
+
+@app.route("/api/sync/sheets", methods=["POST"])
+def api_sync_sheets():
+    def _run():
+        try:
+            from integrations.google_sheets import sync_google_sheets
+            result = sync_google_sheets()
+            log.info("Google Sheets sync: %s", result)
+        except Exception as e:
+            log.warning("Google Sheets sync failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing Google Sheets data..."})
+
+
+@app.route("/api/sync/contacts", methods=["POST"])
+def api_sync_contacts():
+    def _run():
+        # Sync Google Contacts
+        try:
+            from integrations.google_contacts import sync_google_contacts
+            result = sync_google_contacts()
+            log.info("Google Contacts sync: %s", result)
+        except Exception as e:
+            log.warning("Google Contacts sync failed: %s", e)
+        # Sync macOS/iOS Contacts
+        import platform
+        if platform.system() == "Darwin":
+            try:
+                from integrations.macos_contacts import sync_macos_contacts
+                result = sync_macos_contacts()
+                log.info("macOS Contacts sync: %s", result)
+            except Exception as e:
+                log.warning("macOS Contacts sync failed: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Syncing contacts (Google + iOS)..."})
+
+
+@app.route("/api/accounts/geocode", methods=["POST"])
+def api_geocode_accounts():
+    """Geocode all accounts that lack lat/lng. Runs synchronously (fast with known coords)."""
+    try:
+        from utils.geocode import geocode_all_accounts
+        n = geocode_all_accounts(use_nominatim=True)
+        return jsonify({"ok": True, "updated": n})
+    except Exception as e:
+        log.error("Geocode failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/accounts/map")
+def api_accounts_map():
+    """Return all accounts with lat/lng for the map."""
+    accounts = db.get_all_accounts_with_coords()
+    return jsonify(accounts)
+
+
+@app.route("/api/accounts/<int:account_id>/synopsis")
+def api_account_synopsis(account_id: int):
+    """Return the latest update synopsis for an account."""
+    if not db.get_account(account_id):
+        abort(404)
+    synopsis = db.get_account_synopsis(account_id)
+    return jsonify(synopsis or {})
 
 
 @app.route("/api/sync/status")

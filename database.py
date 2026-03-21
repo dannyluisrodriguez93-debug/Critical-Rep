@@ -196,6 +196,9 @@ def _migrate(conn):
     migrations = [
         ("contacts", "imessage_handle", "TEXT"),
         ("products",  "category",        "TEXT"),
+        ("accounts",  "lat",             "REAL"),
+        ("accounts",  "lng",             "REAL"),
+        ("account_notes", "note_date",   "TEXT"),
     ]
     for table, col, typ in migrations:
         try:
@@ -316,6 +319,52 @@ def get_account(account_id: int) -> dict | None:
         return None
     d = dict(row)
     d["aliases"] = json.loads(d.get("aliases") or "[]")
+    return d
+
+
+def update_account_coords(account_id: int, lat: float, lng: float):
+    conn = get_conn()
+    conn.execute("UPDATE accounts SET lat=?, lng=? WHERE id=?", (lat, lng, account_id))
+    conn.commit()
+    conn.close()
+
+
+def get_all_accounts_with_coords() -> list[dict]:
+    """Return all accounts including lat/lng for map rendering."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT a.id, a.name, a.city, a.state, a.lat, a.lng,
+               hs.name as system_name
+        FROM accounts a
+        LEFT JOIN hospital_systems hs ON a.system_id = hs.id
+        ORDER BY a.name
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_account_synopsis(account_id: int) -> dict | None:
+    """
+    Return the most recent update for an account from any source.
+    Checks account_notes (apple_notes, google_sheets, manual) ordered by recency.
+    """
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT source, title, content,
+               COALESCE(note_date, updated_at) as event_date,
+               updated_at
+        FROM account_notes
+        WHERE account_id = ?
+        ORDER BY COALESCE(note_date, updated_at) DESC
+        LIMIT 1
+    """, (account_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    # Produce a short snippet
+    content = d.get("content") or ""
+    d["snippet"] = content[:300].strip()
     return d
 
 
