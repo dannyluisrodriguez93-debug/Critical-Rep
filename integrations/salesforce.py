@@ -32,18 +32,35 @@ _SHIPMENT_OBJECT_CANDIDATES = [
 
 
 def _get_sf():
-    """Return a Salesforce connection or None if unavailable."""
-    # DB settings take priority over env vars
+    """Return a Salesforce connection or None if unavailable.
+
+    Prefers OAuth tokens (Web Server Flow) over legacy username/password auth.
+    """
+    from simple_salesforce import Salesforce
+
+    # ── OAuth path (preferred) ─────────────────────────────────────────────────
+    try:
+        from integrations.salesforce_auth import is_connected, get_access_token, get_instance_url
+        if is_connected():
+            access_token = get_access_token()
+            instance_url = get_instance_url()
+            if access_token and instance_url:
+                sf = Salesforce(session_id=access_token, instance_url=instance_url)
+                log.info("Salesforce connected via OAuth — instance: %s", instance_url)
+                return sf
+    except Exception as e:
+        log.warning("Salesforce OAuth init failed, trying credentials: %s", e)
+
+    # ── Legacy username/password path (fallback) ───────────────────────────────
     username = db.get_setting("sf_username") or config.SF_USERNAME
     password = db.get_setting("sf_password") or config.SF_PASSWORD
     token    = db.get_setting("sf_security_token") or config.SF_SECURITY_TOKEN
     domain   = db.get_setting("sf_domain") or config.SF_DOMAIN
 
     if not all([username, password]):
-        log.info("Salesforce credentials not configured — skipping SF sync")
+        log.info("Salesforce not configured — skipping SF sync")
         return None
     try:
-        from simple_salesforce import Salesforce
         sf = Salesforce(
             username=username,
             password=password,

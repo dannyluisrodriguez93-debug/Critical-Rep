@@ -51,7 +51,7 @@ def index():
 
 # ── Settings API ──────────────────────────────────────────────────────────────
 
-MASKED_KEYS = {"google_client_secret", "sf_password", "sf_security_token", "google_token"}
+MASKED_KEYS = {"google_client_secret", "sf_password", "sf_security_token", "google_token", "sf_oauth_token", "sf_client_secret"}
 
 
 @app.route("/api/settings", methods=["GET"])
@@ -73,7 +73,8 @@ def api_save_settings():
     body = request.get_json(force=True)
     allowed = {
         "google_client_id", "google_client_secret",
-        "sf_username", "sf_password", "sf_security_token", "sf_domain",
+        "sf_client_id", "sf_client_secret", "sf_domain",
+        "sf_username", "sf_password", "sf_security_token",
         "report_senders",
         "setup_complete",
         "alert_mtd_pct", "alert_reorder_days",
@@ -98,11 +99,19 @@ def api_integrations_status():
     google_connected = is_connected()
     google_email = get_connected_email() if google_connected else None
 
-    # Salesforce status
+    # Salesforce status — OAuth (preferred) or legacy credentials
+    from integrations.salesforce_auth import (
+        is_configured as sf_oauth_is_configured,
+        is_connected as sf_oauth_is_connected,
+        get_connected_user as sf_get_user,
+    )
+    sf_oauth_configured = sf_oauth_is_configured()
+    sf_oauth_connected  = sf_oauth_is_connected()
+    sf_connected_user   = sf_get_user() if sf_oauth_connected else None
+    # Legacy fallback
     sf_user = db.get_setting("sf_username") or config.SF_USERNAME
     sf_pass = db.get_setting("sf_password") or config.SF_PASSWORD
-    sf_token = db.get_setting("sf_security_token") or config.SF_SECURITY_TOKEN
-    sf_configured = bool(sf_user and sf_pass)
+    sf_configured = sf_oauth_connected or bool(sf_user and sf_pass)
 
     # Report senders
     report_senders = db.get_setting("report_senders") or ",".join(config.REPORT_SENDERS)
@@ -127,8 +136,11 @@ def api_integrations_status():
             "covers":     ["Gmail", "Google Drive", "Google Sheets", "Google Contacts"],
         },
         "salesforce": {
-            "configured": sf_configured,
-            "username":   sf_user,
+            "configured":        sf_configured,
+            "oauth_configured":  sf_oauth_configured,
+            "oauth_connected":   sf_oauth_connected,
+            "connected_user":    sf_connected_user or sf_user or "",
+            "redirect_uri":      config.SF_REDIRECT_URI,
         },
         "email_parser": {
             "active":         True,
@@ -209,6 +221,49 @@ def google_test():
         return jsonify({"ok": False, "message": f"Token test failed: {e}"})
 
 
+# ── Salesforce OAuth routes ────────────────────────────────────────────────────
+
+@app.route("/integrations/salesforce/start")
+def salesforce_oauth_start():
+    from integrations.salesforce_auth import get_auth_url
+    url = get_auth_url()
+    if not url:
+        return redirect("/#integrations?sf_error=not_configured")
+    return redirect(url)
+
+
+@app.route("/integrations/salesforce/callback")
+def salesforce_oauth_callback():
+    code  = request.args.get("code")
+    state = request.args.get("state")
+    error = request.args.get("error")
+
+    if error:
+        log.warning("Salesforce OAuth error: %s", error)
+        return redirect("/#integrations?sf_error=" + error)
+
+    if not code:
+        return redirect("/#integrations?sf_error=no_code")
+
+    from integrations.salesforce_auth import handle_callback
+    success, message = handle_callback(code=code, state=state)
+
+    if success:
+        return redirect("/#integrations?sf_connected=1")
+    else:
+        return redirect(f"/#integrations?sf_error={message}")
+
+
+@app.route("/integrations/salesforce/disconnect", methods=["POST"])
+def salesforce_oauth_disconnect():
+    from integrations.salesforce_auth import disconnect
+    disconnect()
+    # Also clear legacy credentials if present
+    for key in ("sf_username", "sf_password", "sf_security_token"):
+        db.set_setting(key, None)
+    return jsonify({"ok": True})
+
+
 # ── Salesforce test ────────────────────────────────────────────────────────────
 
 @app.route("/integrations/salesforce/test", methods=["POST"])
@@ -242,11 +297,6 @@ def salesforce_test():
         return jsonify({"ok": False, "message": f"Connection failed: {e}"})
 
 
-@app.route("/integrations/salesforce/disconnect", methods=["POST"])
-def salesforce_disconnect():
-    for key in ("sf_username", "sf_password", "sf_security_token"):
-        db.set_setting(key, None)
-    return jsonify({"ok": True})
 
 
 # ── Dashboard API ─────────────────────────────────────────────────────────────

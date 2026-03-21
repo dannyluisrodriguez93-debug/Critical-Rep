@@ -130,6 +130,7 @@ def sync_google_contacts() -> dict:
         if not account_id and raw_org:
             account_id = _match_to_account(raw_org, all_names, account_names_ids)
 
+        # Strategy 2: fall back to contact name
         if not account_id and name:
             account_id = _match_to_account(name, all_names, account_names_ids)
 

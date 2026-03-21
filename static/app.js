@@ -1328,49 +1328,75 @@ async function googleDisconnect() {
 }
 
 function renderSalesforceCard(sf) {
-  const configured = sf?.configured;
-  const statusHtml = configured
+  const oauthConnected  = sf?.oauth_connected;
+  const oauthConfigured = sf?.oauth_configured;
+  const configured      = sf?.configured;
+
+  const statusHtml = oauthConnected
     ? `<span class="integration-status connected"><span class="status-dot"></span>Connected</span>`
     : `<span class="integration-status not-connected"><span class="status-dot"></span>Not connected</span>`;
 
-  const bodyHtml = `
-    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
-      Salesforce is optional. If connected, contacts, shipment revenue, and opportunity data are pulled in automatically.
-    </p>
-    <div class="integration-form">
-      <div class="form-row">
-        <div class="form-group">
-          <label>Salesforce Username</label>
-          <input type="text" id="sf-username" placeholder="you@company.com" value="${escHtml(sf?.username||'')}">
+  let bodyHtml;
+
+  if (oauthConnected) {
+    // ── Already connected via OAuth ──────────────────────────────────────────
+    const user = escHtml(sf?.connected_user || "");
+    bodyHtml = `
+      <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px">
+        Connected as <strong>${user}</strong>. Contacts and opportunity data sync automatically.
+      </p>
+      <div class="integration-actions">
+        <button class="btn btn-sm btn-ghost" onclick="syncSalesforce()">&#9729; Sync Now</button>
+        <button class="btn btn-danger btn-sm" onclick="salesforceDisconnect()">Disconnect</button>
+      </div>`;
+  } else if (oauthConfigured) {
+    // ── Connected App creds saved, ready to do SSO ───────────────────────────
+    bodyHtml = `
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+        Connected App credentials saved. Click below to authenticate via your company SSO.
+      </p>
+      <div class="integration-actions">
+        <button class="btn btn-primary btn-sm" onclick="salesforceOAuthStart()">&#9729; Connect via SSO</button>
+      </div>`;
+  } else {
+    // ── Need Connected App Consumer Key + Secret ─────────────────────────────
+    bodyHtml = `
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
+        Salesforce uses OAuth SSO — no username or password needed here.
+        First, create a <strong>Connected App</strong> in Salesforce Setup, then paste the credentials below.
+        <br><a href="#" onclick="showSFSetupHelp(); return false;" style="color:var(--accent)">How to create a Connected App →</a>
+      </p>
+      <div class="integration-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Consumer Key <span style="font-weight:400;color:var(--text-muted)">(Client ID)</span></label>
+            <input type="text" id="sf-client-id" placeholder="3MVG9..." value="${escHtml(sf?.client_id||'')}">
+          </div>
+          <div class="form-group">
+            <label>Consumer Secret <span style="font-weight:400;color:var(--text-muted)">(Client Secret)</span></label>
+            <input type="password" id="sf-client-secret" placeholder="••••••••">
+          </div>
         </div>
         <div class="form-group">
-          <label>Domain</label>
+          <label>Domain <span style="font-weight:400;color:var(--text-muted)">(use "login" for standard, "test" for sandbox, or your custom domain)</span></label>
           <input type="text" id="sf-domain" placeholder="login" value="login">
         </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" id="sf-password" placeholder="••••••••">
-        </div>
-        <div class="form-group">
-          <label>Security Token <span style="font-weight:400;color:var(--text-muted)">(from SF settings)</span></label>
-          <input type="password" id="sf-token" placeholder="••••••••">
+        <div class="form-group" style="margin-top:4px">
+          <label style="color:var(--text-muted);font-size:0.78rem">Callback URL to enter in Connected App:</label>
+          <code style="font-size:0.78rem;background:var(--surface-2);padding:4px 8px;border-radius:4px;display:block;margin-top:4px">${escHtml(sf?.redirect_uri||'http://localhost:5001/integrations/salesforce/callback')}</code>
         </div>
       </div>
-    </div>
-    <div class="integration-actions">
-      <button class="btn btn-primary btn-sm" onclick="salesforceTest()">Test & Save</button>
-      ${configured ? `<button class="btn btn-danger btn-sm" onclick="salesforceDisconnect()">Disconnect</button>` : ""}
-      <button class="btn btn-sm btn-ghost" onclick="syncSalesforce()">&#9729; Sync Now</button>
-    </div>`;
+      <div class="integration-actions">
+        <button class="btn btn-primary btn-sm" onclick="salesforceSaveCredentials()">Save &amp; Connect via SSO</button>
+      </div>`;
+  }
 
   return `<div class="integration-card ${configured?'connected':''}">
     <div class="integration-card-header">
       <span class="integration-icon">☁️</span>
       <div class="integration-info">
         <div class="integration-name">Salesforce</div>
-        <div class="integration-desc">Contacts, shipment revenue, and opportunity data</div>
+        <div class="integration-desc">Contacts, shipment revenue, and opportunity data via SSO</div>
       </div>
       ${statusHtml}
     </div>
@@ -1378,18 +1404,20 @@ function renderSalesforceCard(sf) {
   </div>`;
 }
 
-async function salesforceTest() {
-  const username = document.getElementById("sf-username")?.value?.trim();
-  const password = document.getElementById("sf-password")?.value?.trim();
-  const token    = document.getElementById("sf-token")?.value?.trim();
-  const domain   = document.getElementById("sf-domain")?.value?.trim() || "login";
-  if (!username || !password) { toast("Username and password are required", "error"); return; }
-  toast("Testing connection…", "info");
+async function salesforceSaveCredentials() {
+  const clientId     = document.getElementById("sf-client-id")?.value?.trim();
+  const clientSecret = document.getElementById("sf-client-secret")?.value?.trim();
+  const domain       = document.getElementById("sf-domain")?.value?.trim() || "login";
+  if (!clientId || !clientSecret) { toast("Consumer Key and Secret are required", "error"); return; }
   try {
-    const r = await post("/integrations/salesforce/test", { username, password, security_token: token, domain });
-    if (r.ok) { toast(r.message, "success"); loadIntegrationsPage(); }
-    else toast(r.message, "error");
+    await post("/api/settings", { sf_client_id: clientId, sf_client_secret: clientSecret, sf_domain: domain });
+    toast("Credentials saved — opening Salesforce login…", "info");
+    setTimeout(() => { window.location.href = "/integrations/salesforce/start"; }, 800);
   } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+function salesforceOAuthStart() {
+  window.location.href = "/integrations/salesforce/start";
 }
 
 async function salesforceDisconnect() {
@@ -1399,6 +1427,38 @@ async function salesforceDisconnect() {
     toast("Salesforce disconnected", "info");
     loadIntegrationsPage();
   } catch(e) { toast("Failed: " + e.message, "error"); }
+}
+
+function showSFSetupHelp() {
+  openModal("How to Create a Salesforce Connected App", `
+    <ol style="font-size:0.875rem;line-height:1.8;padding-left:1.25rem">
+      <li>Log in to Salesforce and go to <strong>Setup</strong> (gear icon → Setup)</li>
+      <li>Search for <strong>App Manager</strong> in the Quick Find box</li>
+      <li>Click <strong>New Connected App</strong></li>
+      <li>Fill in:
+        <ul style="margin-top:4px">
+          <li><strong>Connected App Name:</strong> Account Hub</li>
+          <li><strong>API Name:</strong> Account_Hub</li>
+          <li><strong>Contact Email:</strong> your email</li>
+        </ul>
+      </li>
+      <li>Under <strong>API (Enable OAuth Settings)</strong>:
+        <ul style="margin-top:4px">
+          <li>Check <strong>Enable OAuth Settings</strong></li>
+          <li>Set <strong>Callback URL</strong> to:<br>
+            <code style="background:var(--surface-2);padding:2px 6px;border-radius:4px">http://localhost:5001/integrations/salesforce/callback</code>
+          </li>
+          <li>Add scopes: <strong>Access and manage your data (api)</strong> and <strong>Perform requests at any time (refresh_token, offline_access)</strong></li>
+        </ul>
+      </li>
+      <li>Click <strong>Save</strong>, then <strong>Continue</strong></li>
+      <li>Click <strong>Manage Consumer Details</strong> — copy the <strong>Consumer Key</strong> and <strong>Consumer Secret</strong></li>
+      <li>Paste them into the fields above and click <strong>Save &amp; Connect via SSO</strong></li>
+    </ol>
+    <p style="font-size:0.82rem;color:var(--text-muted);margin-top:12px">
+      Note: New Connected Apps may take 2–10 minutes to activate in Salesforce.
+    </p>
+  `);
 }
 
 function renderEmailParserCard(ep) {
@@ -1581,16 +1641,19 @@ function renderWizardStep() {
       title: "Salesforce (Optional)",
       sub:   "If you have Salesforce access, connecting it pulls contacts, shipment revenue, and opportunities automatically.",
       html:  `<div class="form-row">
-                <div class="form-group"><label>Username</label>
-                  <input type="text" id="wiz-sf-user" placeholder="you@company.com"></div>
-                <div class="form-group"><label>Password</label>
-                  <input type="password" id="wiz-sf-pass" placeholder="••••••••"></div>
+                <div class="form-group"><label>Consumer Key <span style="font-weight:400;color:var(--text-muted)">(Client ID)</span></label>
+                  <input type="text" id="wiz-sf-client-id" placeholder="3MVG9..."></div>
+                <div class="form-group"><label>Consumer Secret</label>
+                  <input type="password" id="wiz-sf-client-secret" placeholder="••••••••"></div>
               </div>
-              <div class="form-group"><label>Security Token <span style="font-weight:400;color:var(--text-muted)">(from Salesforce Settings → Reset Security Token)</span></label>
-                <input type="password" id="wiz-sf-token" placeholder="••••••••"></div>
+              <div class="form-group"><label>Domain <span style="font-weight:400;color:var(--text-muted)">(login, test, or your custom domain)</span></label>
+                <input type="text" id="wiz-sf-domain" placeholder="login" value="login"></div>
               <div class="integration-actions" style="margin-top:14px">
-                <button class="btn btn-sm" onclick="wizardTestSalesforce()">Test & Save</button>
-              </div>`,
+                <button class="btn btn-primary btn-sm" onclick="wizardSaveAndConnectSalesforce()">Save &amp; Connect via SSO</button>
+              </div>
+              <p style="font-size:0.78rem;color:var(--text-muted);margin-top:10px">
+                <a href="#" onclick="showSFSetupHelp(); return false;" style="color:var(--accent)">How to create a Connected App →</a>
+              </p>`,
       next:  "Next",
       skip:  "Skip Salesforce",
     },
@@ -1664,27 +1727,26 @@ async function wizardSaveAndConnectGoogle() {
   } catch(e) { toast("Failed: " + e.message, "error"); }
 }
 
-async function wizardTestSalesforce() {
-  const username = document.getElementById("wiz-sf-user")?.value?.trim();
-  const password = document.getElementById("wiz-sf-pass")?.value?.trim();
-  const token    = document.getElementById("wiz-sf-token")?.value?.trim();
-  if (!username || !password) { toast("Enter username and password", "error"); return; }
-  toast("Testing Salesforce connection…", "info");
+async function wizardSaveAndConnectSalesforce() {
+  const clientId     = document.getElementById("wiz-sf-client-id")?.value?.trim();
+  const clientSecret = document.getElementById("wiz-sf-client-secret")?.value?.trim();
+  const domain       = document.getElementById("wiz-sf-domain")?.value?.trim() || "login";
+  if (!clientId || !clientSecret) { toast("Enter Consumer Key and Consumer Secret", "error"); return; }
   try {
-    const r = await post("/integrations/salesforce/test", { username, password, security_token: token, domain: "login" });
-    if (r.ok) toast(r.message, "success");
-    else toast(r.message, "error");
+    await post("/api/settings", { sf_client_id: clientId, sf_client_secret: clientSecret, sf_domain: domain });
+    toast("Credentials saved — opening Salesforce login…", "info");
+    setTimeout(() => { window.location.href = "/integrations/salesforce/start"; }, 800);
   } catch(e) { toast("Failed: " + e.message, "error"); }
 }
 
-// ── Check for Google OAuth callback result in URL hash ─────────────────
+// ── Check for OAuth callback results in URL hash ────────────────────────
 function checkOAuthCallback() {
   const hash = window.location.hash;
+
   if (hash.includes("google_connected=1")) {
     toast("Google account connected successfully!", "success");
     history.replaceState(null, "", "/");
     showIntegrations();
-    // Pre-advance wizard step so checkFirstRun() opens at the right step
     _wizardStep = Math.max(_wizardStep, WIZARD_STEPS.indexOf("salesforce"));
     return;
   }
@@ -1693,6 +1755,21 @@ function checkOAuthCallback() {
     toast("Google connection failed: " + msg, "error");
     history.replaceState(null, "", "/");
   }
+
+  if (hash.includes("sf_connected=1")) {
+    toast("Salesforce connected successfully!", "success");
+    history.replaceState(null, "", "/");
+    showIntegrations();
+    _wizardStep = Math.max(_wizardStep, WIZARD_STEPS.indexOf("email"));
+    return;
+  }
+  if (hash.includes("sf_error=")) {
+    const msg = decodeURIComponent(hash.split("sf_error=")[1] || "unknown error");
+    toast("Salesforce connection failed: " + msg, "error");
+    history.replaceState(null, "", "/");
+    showIntegrations();
+  }
+
   if (hash.includes("integrations")) {
     showIntegrations();
     history.replaceState(null, "", "/");
