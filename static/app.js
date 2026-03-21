@@ -1252,7 +1252,7 @@ function renderSalesforceCard(sf) {
 
   const bodyHtml = `
     <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:14px">
-      Salesforce is optional. If connected, contacts and opportunity data are pulled in automatically.
+      Salesforce is optional. If connected, contacts, shipment revenue, and opportunity data are pulled in automatically.
     </p>
     <div class="integration-form">
       <div class="form-row">
@@ -1287,7 +1287,7 @@ function renderSalesforceCard(sf) {
       <span class="integration-icon">☁️</span>
       <div class="integration-info">
         <div class="integration-name">Salesforce</div>
-        <div class="integration-desc">Contacts, accounts, and opportunity data</div>
+        <div class="integration-desc">Contacts, shipment revenue, and opportunity data</div>
       </div>
       ${statusHtml}
     </div>
@@ -1496,7 +1496,7 @@ function renderWizardStep() {
     },
     salesforce: {
       title: "Salesforce (Optional)",
-      sub:   "If you have Salesforce access, connecting it pulls contacts and opportunities automatically.",
+      sub:   "If you have Salesforce access, connecting it pulls contacts, shipment revenue, and opportunities automatically.",
       html:  `<div class="form-row">
                 <div class="form-group"><label>Username</label>
                   <input type="text" id="wiz-sf-user" placeholder="you@company.com"></div>
